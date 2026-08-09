@@ -14,6 +14,6 @@
 - [x] AI-maintainership notice included
 - [x] Create `eshanagarwal05/whoosh` on GitHub
 - [x] Push source tree
-- [ ] Test public Whoosh UUID + backend namespace on GNOME Shell 50
+- [x] Test public Whoosh UUID + backend namespace on GNOME Shell 50
 - [ ] Upload Whoosh ZIP to extensions.gnome.org
 - [ ] Address reviewer feedback

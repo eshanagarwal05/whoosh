@@ -32,9 +32,10 @@ two-finger swipe gesture. The Whoosh backend reads only the detected touchpad,
 recognizes gestures, and emits action names over the system D-Bus. The GNOME
 Shell extension performs the actual window operations.
 
-Half and quarter tiling use the same clone/freeze/resize/ease animation pattern
-GNOME Shell uses for animated window size changes, so tiling visually matches
-GNOME's native maximize behavior more closely.
+Half and quarter tiling keep Mutter's `move_resize_frame()` call as the source
+of truth and add a compositor-only visual overlay inspired by GNOME Shell's
+native size-change animation. The overlay never freezes or owns window
+geometry, and animation setup failures fall back to direct tiling.
 
 ## Install the backend
 
