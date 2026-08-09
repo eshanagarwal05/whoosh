@@ -25,6 +25,7 @@ SCROLL_THRESHOLD = 65.0
 AXIS_DOMINANCE = 1.25
 SCROLL_STREAM_GAP = 0.18
 CORNER_VERTICAL_THRESHOLD = 50.0
+CORNER_CHAIN_TIMEOUT = 0.30
 PINCH_IN_THRESHOLD = 0.78
 PINCH_OUT_THRESHOLD = 1.35
 
@@ -105,6 +106,7 @@ class GestureRecognizer:
         self.scroll_last_time = 0.0
         self.scroll_triggered = False
         self.corner_arm = None
+        self.corner_armed_at = 0.0
         self.corner_y = 0.0
         self.corner_triggered = False
         self.pinch_active = False
@@ -120,6 +122,7 @@ class GestureRecognizer:
         self.scroll_last_time = now or 0.0
         self.scroll_triggered = False
         self.corner_arm = None
+        self.corner_armed_at = 0.0
         self.corner_y = 0.0
         self.corner_triggered = False
 
@@ -149,16 +152,20 @@ class GestureRecognizer:
             return
 
         if new_stream:
-            # Capture the topmost title-bar window before any geometry changes.
             self.emit("scroll_begin")
 
         if self.corner_arm and not self.corner_triggered:
-            self.corner_y += dy
-            if abs(self.corner_y) >= CORNER_VERTICAL_THRESHOLD:
-                vertical = "up" if self.corner_y < 0 else "down"
-                self.corner_triggered = True
-                self.emit(f"corner_{self.corner_arm}_{vertical}")
-            return
+            if now - self.corner_armed_at > CORNER_CHAIN_TIMEOUT:
+                self.corner_arm = None
+                self.corner_armed_at = 0.0
+                self.corner_y = 0.0
+            else:
+                self.corner_y += dy
+                if abs(self.corner_y) >= CORNER_VERTICAL_THRESHOLD:
+                    vertical = "up" if self.corner_y < 0 else "down"
+                    self.corner_triggered = True
+                    self.emit(f"corner_{self.corner_arm}_{vertical}")
+                return
 
         if self.scroll_triggered:
             return
@@ -172,6 +179,7 @@ class GestureRecognizer:
             side = "left" if self.scroll_x < 0 else "right"
             self.scroll_triggered = True
             self.corner_arm = side
+            self.corner_armed_at = now
             self.corner_y = 0.0
             self.emit(side)
             return
