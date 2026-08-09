@@ -5,16 +5,12 @@
 // Do NOT upload to extensions.gnome.org (EGO) unless you understand JavaScript
 // and can maintain this code.
 
-import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
-import St from 'gi://St';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
-import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 const TITLEBAR_HEIGHT = 56;
 const CORNER_CHAIN_US = 300_000;
-const TILE_ANIMATION_MS = 250;
 
 const BUS_NAME = 'io.github.eshanagarwal05.Whoosh';
 const OBJECT_PATH = '/io/github/eshanagarwal05/Whoosh';
@@ -25,7 +21,6 @@ export default class WhooshExtension extends Extension {
         this._lastHorizontal = null;
         this._scrollTarget = null;
         this._pinchTarget = null;
-        this._tileAnimations = new Map();
 
         this._dbusSignalId = Gio.DBus.system.signal_subscribe(
             BUS_NAME,
@@ -47,10 +42,6 @@ export default class WhooshExtension extends Extension {
             this._dbusSignalId = 0;
         }
 
-        for (const actor of this._tileAnimations.keys())
-            this._finishTileAnimation(actor);
-
-        this._tileAnimations.clear();
         this._lastHorizontal = null;
         this._scrollTarget = null;
         this._pinchTarget = null;
@@ -239,37 +230,33 @@ export default class WhooshExtension extends Extension {
             win.activate(time);
     }
 
-    _prepareForResize(win, actor) {
-        if (win.is_fullscreen()) {
-            if (actor)
-                Main.wm.skipNextEffect(actor);
+    _prepareForResize(win) {
+        if (win.is_fullscreen())
             win.unmake_fullscreen();
-        }
 
         const maximizeFlags = win.get_maximize_flags();
-        if (maximizeFlags) {
-            if (actor)
-                Main.wm.skipNextEffect(actor);
+        if (maximizeFlags)
             win.unmaximize(maximizeFlags);
-        }
     }
 
     _tileHalf(win, side) {
+        this._prepareForResize(win);
+
         const area = win.get_work_area_current_monitor();
         const leftWidth = Math.floor(area.width / 2);
         const rightWidth = area.width - leftWidth;
 
         if (side === 'left') {
-            this._moveResizeAnimated(
-                win,
+            win.move_resize_frame(
+                true,
                 area.x,
                 area.y,
                 leftWidth,
                 area.height
             );
         } else {
-            this._moveResizeAnimated(
-                win,
+            win.move_resize_frame(
+                true,
                 area.x + leftWidth,
                 area.y,
                 rightWidth,
@@ -279,6 +266,8 @@ export default class WhooshExtension extends Extension {
     }
 
     _tileCorner(win, side, vertical) {
+        this._prepareForResize(win);
+
         const area = win.get_work_area_current_monitor();
         const leftWidth = Math.floor(area.width / 2);
         const rightWidth = area.width - leftWidth;
@@ -290,131 +279,19 @@ export default class WhooshExtension extends Extension {
         const width = side === 'left' ? leftWidth : rightWidth;
         const height = vertical === 'top' ? topHeight : bottomHeight;
 
-        this._moveResizeAnimated(win, x, y, width, height);
-    }
-
-    _moveResizeAnimated(win, x, y, width, height) {
-        const oldRect = win.get_frame_rect();
-        const actor = win.get_compositor_private();
-        const settings = St.Settings.get();
-
-        const fallback = () => {
-            this._prepareForResize(win, actor);
-            win.move_resize_frame(true, x, y, width, height);
-        };
-
-        if (!actor ||
-            !actor.get_texture() ||
-            oldRect.width <= 0 ||
-            oldRect.height <= 0 ||
-            settings.reduced_motion === St.ReducedMotion.REDUCE) {
-            fallback();
-            return;
-        }
-
-        this._finishTileAnimation(actor);
-
-        // paint_to_content() expects its clip in ACTOR coordinates. Passing
-        // null snapshots the full actor, which is what we want here.
-        const actorContent = actor.paint_to_content(null);
-        if (!actorContent) {
-            fallback();
-            return;
-        }
-
-        const clone = new St.Widget({content: actorContent});
-        clone.set_offscreen_redirect(Clutter.OffscreenRedirect.ALWAYS);
-        clone.set_pivot_point(0, 0);
-        clone.set_position(oldRect.x, oldRect.y);
-        clone.set_size(oldRect.width, oldRect.height);
-
-        // Put the old-frame snapshot on screen BEFORE changing geometry. This
-         // masks the real actor while Mutter applies the tile geometry.
-        Main.uiGroup.add_child(clone);
-        this._tileAnimations.set(actor, {clone});
-
-        // Never freeze the Meta.WindowActor here: freeze() explicitly inhibits
-         // geometry changes, which would prevent move_resize_frame() from tiling.
-        this._prepareForResize(win, actor);
         win.move_resize_frame(true, x, y, width, height);
-
-        GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
-            const state = this._tileAnimations.get(actor);
-            if (!state || state.clone !== clone)
-                return GLib.SOURCE_REMOVE;
-
-            if (!actor.is_mapped()) {
-                this._finishTileAnimation(actor);
-                return GLib.SOURCE_REMOVE;
-            }
-
-            const targetRect = win.get_frame_rect();
-            if (targetRect.width <= 0 || targetRect.height <= 0) {
-                this._finishTileAnimation(actor);
-                return GLib.SOURCE_REMOVE;
-            }
-
-            const targetScaleX = targetRect.width / oldRect.width;
-            const targetScaleY = targetRect.height / oldRect.height;
-            const inverseScaleX = oldRect.width / targetRect.width;
-            const inverseScaleY = oldRect.height / targetRect.height;
-
-            actor.remove_all_transitions();
-            actor.set_pivot_point(0, 0);
-            actor.translation_x = oldRect.x - targetRect.x;
-            actor.translation_y = oldRect.y - targetRect.y;
-            actor.scale_x = inverseScaleX;
-            actor.scale_y = inverseScaleY;
-
-            clone.ease({
-                x: targetRect.x,
-                y: targetRect.y,
-                scale_x: targetScaleX,
-                scale_y: targetScaleY,
-                opacity: 0,
-                duration: TILE_ANIMATION_MS,
-                mode: Clutter.AnimationMode.EASE_OUT_QUAD,
-            });
-
-            actor.ease({
-                scale_x: 1,
-                scale_y: 1,
-                translation_x: 0,
-                translation_y: 0,
-                duration: TILE_ANIMATION_MS,
-                mode: Clutter.AnimationMode.EASE_OUT_QUAD,
-                onStopped: () => this._finishTileAnimation(actor),
-            });
-
-            return GLib.SOURCE_REMOVE;
-        });
-    }
-
-    _finishTileAnimation(actor) {
-        const state = this._tileAnimations?.get(actor);
-        if (!state)
-            return;
-
-        actor.remove_all_transitions();
-        actor.scale_x = 1;
-        actor.scale_y = 1;
-        actor.translation_x = 0;
-        actor.translation_y = 0;
-
-        state.clone.destroy();
-        this._tileAnimations.delete(actor);
     }
 
     _maximize(win) {
         if (win.is_fullscreen())
-            win.unmake_fulscreen();
+            win.unmake_fullscreen();
 
         if (win.can_maximize() && !win.is_maximized())
             win.maximize();
     }
 
     _fullscreen(win) {
-        if (!win.is_fulscreen())
+        if (!win.is_fullscreen())
             win.make_fullscreen();
     }
 
