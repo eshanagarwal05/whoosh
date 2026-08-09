@@ -11,7 +11,7 @@ Whoosh brings two-finger, title-bar-first window gestures to GNOME Shell 50.
 | Two-finger swipe up | Maximize |
 | Two-finger swipe down | Minimize |
 | Pinch in | Close |
-| Pinch out | Move to an empty/new workspace and follow |
+| Pinch out | Fullscreen |
 | Left → Up | Top-left quarter |
 | Left → Down | Bottom-left quarter |
 | Right → Up | Top-right quarter |
@@ -21,12 +21,20 @@ Whoosh targets the topmost visible window under the pointer, even if it is not
 focused. Actions that leave the window visible focus it afterward. Minimize and
 close do not focus the window first.
 
+Corner chaining is intentionally short: the vertical turn must begin within
+300 ms of the horizontal tile recognition. This keeps ordinary up/down swipes
+from being mistaken for quarter tiling.
+
 ## Architecture
 
 libinput exposes two-finger movement as smooth scrolling rather than as a
 two-finger swipe gesture. The Whoosh backend reads only the detected touchpad,
 recognizes gestures, and emits action names over the system D-Bus. The GNOME
 Shell extension performs the actual window operations.
+
+Half and quarter tiling use the same clone/freeze/resize/ease animation pattern
+GNOME Shell uses for animated window size changes, so tiling visually matches
+GNOME's native maximize behavior more closely.
 
 ## Install the backend
 
@@ -55,6 +63,19 @@ Log out and back in, then:
 ```bash
 gnome-extensions enable 'whoosh@eshanagarwal05.github.io'
 ```
+
+## Updating
+
+```bash
+cd ~/Downloads/whoosh
+git pull
+cd backend
+./install.sh
+cd ..
+make extension-zip
+```
+
+Then reinstall the generated extension ZIP and log out/in.
 
 ## GNOME Extensions submission
 
