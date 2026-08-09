@@ -135,14 +135,22 @@ class GestureRecognizer:
 
     def handle_scroll(self, dx, dy):
         now = time.monotonic()
+        new_stream = (
+            not self.scroll_last_time
+            or now - self.scroll_last_time > SCROLL_STREAM_GAP
+        )
 
-        if self.scroll_last_time and now - self.scroll_last_time > SCROLL_STREAM_GAP:
+        if new_stream:
             self.reset_scroll(now)
 
         self.scroll_last_time = now
 
         if dx == 0.0 and dy == 0.0:
             return
+
+        if new_stream:
+            # Capture the topmost title-bar window before any geometry changes.
+            self.emit("scroll_begin")
 
         if self.corner_arm and not self.corner_triggered:
             self.corner_y += dy
