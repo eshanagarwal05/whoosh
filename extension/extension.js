@@ -239,18 +239,22 @@ export default class WhooshExtension extends Extension {
             win.activate(time);
     }
 
-    _prepareForResize(win) {
-        if (win.is_fullscreen())
+    _prepareForResize(win, actor) {
+        if (win.is_fullscreen()) {
+            if (actor)
+                Main.wm.skipNextEffect(actor);
             win.unmake_fullscreen();
+        }
 
         const maximizeFlags = win.get_maximize_flags();
-        if (maximizeFlags)
+        if (maximizeFlags) {
+            if (actor)
+                Main.wm.skipNextEffect(actor);
             win.unmaximize(maximizeFlags);
+        }
     }
 
     _tileHalf(win, side) {
-        this._prepareForResize(win);
-
         const area = win.get_work_area_current_monitor();
         const leftWidth = Math.floor(area.width / 2);
         const rightWidth = area.width - leftWidth;
@@ -275,8 +279,6 @@ export default class WhooshExtension extends Extension {
     }
 
     _tileCorner(win, side, vertical) {
-        this._prepareForResize(win);
-
         const area = win.get_work_area_current_monitor();
         const leftWidth = Math.floor(area.width / 2);
         const rightWidth = area.width - leftWidth;
@@ -301,6 +303,7 @@ export default class WhooshExtension extends Extension {
             oldRect.width <= 0 ||
             oldRect.height <= 0 ||
             reducedMotion === St.ReducedMotion.REDUCE) {
+            this._prepareForResize(win, actor);
             win.move_resize_frame(true, x, y, width, height);
             return;
         }
@@ -309,6 +312,7 @@ export default class WhooshExtension extends Extension {
 
         const actorContent = actor.paint_to_content(oldRect);
         if (!actorContent) {
+            this._prepareForResize(win, actor);
             win.move_resize_frame(true, x, y, width, height);
             return;
         }
@@ -324,6 +328,9 @@ export default class WhooshExtension extends Extension {
         actor.freeze();
         this._tileAnimations.set(actor, {clone, frozen: true});
 
+        // Suppress Shell's intermediate restore effect so there is only one
+        // continuous old-frame -> tile-frame animation.
+        this._prepareForResize(win, actor);
         win.move_resize_frame(true, x, y, width, height);
 
         GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
