@@ -1,1 +1,0 @@
-Temporary release note for Whoosh 1.2.1: fixes tiling regression caused by freezing Meta.WindowActor before move_resize_frame(). The corrected animation path snapshots the whole actor with paint_to_content(null), overlays the snapshot before resizing, and never freezes the real actor. This file may be removed after validation.
