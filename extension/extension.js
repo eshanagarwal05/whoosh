@@ -296,40 +296,45 @@ export default class WhooshExtension extends Extension {
     _moveResizeAnimated(win, x, y, width, height) {
         const oldRect = win.get_frame_rect();
         const actor = win.get_compositor_private();
-        const {reducedMotion} = St.Settings.get();
+        const settings = St.Settings.get();
+
+        const fallback = () => {
+            this._prepareForResize(win, actor);
+            win.move_resize_frame(true, x, y, width, height);
+        };
 
         if (!actor ||
             !actor.get_texture() ||
             oldRect.width <= 0 ||
             oldRect.height <= 0 ||
-            reducedMotion === St.ReducedMotion.REDUCE) {
-            this._prepareForResize(win, actor);
-            win.move_resize_frame(true, x, y, width, height);
+            settings.reduced_motion === St.ReducedMotion.REDUCE) {
+            fallback();
             return;
         }
 
         this._finishTileAnimation(actor);
 
-        const actorContent = actor.paint_to_content(oldRect);
+        // paint_to_content() expects its clip in ACTOR coordinates. Passing
+        // null snapshots the full actor, which is what we want here.
+        const actorContent = actor.paint_to_content(null);
         if (!actorContent) {
-            this._prepareForResize(win, actor);
-            win.move_resize_frame(true, x, y, width, height);
+            fallback();
             return;
         }
 
-        // Mirror GNOME Shell's own maximize/size-change animation: freeze the
-        // old actor, paint a clone over it, commit the new window geometry,
-        // then animate both old and new representations into the final frame.
         const clone = new St.Widget({content: actorContent});
         clone.set_offscreen_redirect(Clutter.OffscreenRedirect.ALWAYS);
+        clone.set_pivot_point(0, 0);
         clone.set_position(oldRect.x, oldRect.y);
         clone.set_size(oldRect.width, oldRect.height);
 
-        actor.freeze();
-        this._tileAnimations.set(actor, {clone, frozen: true});
+        // Put the old-frame snapshot on screen BEFORE changing geometry. This
+         // masks the real actor while Mutter applies the tile geometry.
+        Main.uiGroup.add_child(clone);
+        this._tileAnimations.set(actor, {clone});
 
-        // Suppress Shell's intermediate restore effect so there is only one
-        // continuous old-frame -> tile-frame animation.
+        // Never freeze the Meta.WindowActor here: freeze() explicitly inhibits
+         // geometry changes, which would prevent move_resize_frame() from tiling.
         this._prepareForResize(win, actor);
         win.move_resize_frame(true, x, y, width, height);
 
@@ -349,28 +354,27 @@ export default class WhooshExtension extends Extension {
                 return GLib.SOURCE_REMOVE;
             }
 
-            const scaleX = targetRect.width / oldRect.width;
-            const scaleY = targetRect.height / oldRect.height;
+            const targetScaleX = targetRect.width / oldRect.width;
+            const targetScaleY = targetRect.height / oldRect.height;
+            const inverseScaleX = oldRect.width / targetRect.width;
+            const inverseScaleY = oldRect.height / targetRect.height;
 
-            Main.uiGroup.add_child(clone);
+            actor.remove_all_transitions();
+            actor.set_pivot_point(0, 0);
+            actor.translation_x = oldRect.x - targetRect.x;
+            actor.translation_y = oldRect.y - targetRect.y;
+            actor.scale_x = inverseScaleX;
+            actor.scale_y = inverseScaleY;
 
             clone.ease({
                 x: targetRect.x,
                 y: targetRect.y,
-                scale_x: scaleX,
-                scale_y: scaleY,
+                scale_x: targetScaleX,
+                scale_y: targetScaleY,
                 opacity: 0,
                 duration: TILE_ANIMATION_MS,
                 mode: Clutter.AnimationMode.EASE_OUT_QUAD,
             });
-
-            actor.translation_x = -targetRect.x + oldRect.x;
-            actor.translation_y = -targetRect.y + oldRect.y;
-            actor.scale_x = 1 / scaleX;
-            actor.scale_y = 1 / scaleY;
-
-            actor.thaw();
-            state.frozen = false;
 
             actor.ease({
                 scale_x: 1,
@@ -397,23 +401,20 @@ export default class WhooshExtension extends Extension {
         actor.translation_x = 0;
         actor.translation_y = 0;
 
-        if (state.frozen)
-            actor.thaw();
-
         state.clone.destroy();
         this._tileAnimations.delete(actor);
     }
 
     _maximize(win) {
         if (win.is_fullscreen())
-            win.unmake_fullscreen();
+            win.unmake_fulscreen();
 
         if (win.can_maximize() && !win.is_maximized())
             win.maximize();
     }
 
     _fullscreen(win) {
-        if (!win.is_fullscreen())
+        if (!win.is_fulscreen())
             win.make_fullscreen();
     }
 
