@@ -5,12 +5,18 @@
 // Do NOT upload to extensions.gnome.org (EGO) unless you understand JavaScript
 // and can maintain this code.
 
+import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
+import St from 'gi://St';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
+import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 const TITLEBAR_HEIGHT = 56;
 const CORNER_CHAIN_US = 300_000;
+const TILE_ANIMATION_MS = 250;
+const TILE_SETTLE_MS = 16;
+const TILE_SETTLE_ATTEMPTS = 4;
 
 const BUS_NAME = 'io.github.eshanagarwal05.Whoosh';
 const OBJECT_PATH = '/io/github/eshanagarwal05/Whoosh';
@@ -21,6 +27,7 @@ export default class WhooshExtension extends Extension {
         this._lastHorizontal = null;
         this._scrollTarget = null;
         this._pinchTarget = null;
+        this._tileAnimations = new Map();
 
         this._dbusSignalId = Gio.DBus.system.signal_subscribe(
             BUS_NAME,
@@ -42,9 +49,13 @@ export default class WhooshExtension extends Extension {
             this._dbusSignalId = 0;
         }
 
+        for (const actor of [...this._tileAnimations.keys()])
+            this._finishTileAnimation(actor);
+
         this._lastHorizontal = null;
         this._scrollTarget = null;
         this._pinchTarget = null;
+        this._tileAnimations.clear();
     }
 
     _handleAction(action) {
@@ -230,33 +241,37 @@ export default class WhooshExtension extends Extension {
             win.activate(time);
     }
 
-    _prepareForResize(win) {
-        if (win.is_fullscreen())
+    _prepareForResize(win, actor = null) {
+        if (win.is_fullscreen()) {
+            if (actor)
+                Main.wm.skipNextEffect(actor);
             win.unmake_fullscreen();
+        }
 
         const maximizeFlags = win.get_maximize_flags();
-        if (maximizeFlags)
+        if (maximizeFlags) {
+            if (actor)
+                Main.wm.skipNextEffect(actor);
             win.unmaximize(maximizeFlags);
+        }
     }
 
     _tileHalf(win, side) {
-        this._prepareForResize(win);
-
         const area = win.get_work_area_current_monitor();
         const leftWidth = Math.floor(area.width / 2);
         const rightWidth = area.width - leftWidth;
 
         if (side === 'left') {
-            win.move_resize_frame(
-                true,
+            this._moveResizeAnimated(
+                win,
                 area.x,
                 area.y,
                 leftWidth,
                 area.height
             );
         } else {
-            win.move_resize_frame(
-                true,
+            this._moveResizeAnimated(
+                win,
                 area.x + leftWidth,
                 area.y,
                 rightWidth,
@@ -266,8 +281,6 @@ export default class WhooshExtension extends Extension {
     }
 
     _tileCorner(win, side, vertical) {
-        this._prepareForResize(win);
-
         const area = win.get_work_area_current_monitor();
         const leftWidth = Math.floor(area.width / 2);
         const rightWidth = area.width - leftWidth;
@@ -279,7 +292,158 @@ export default class WhooshExtension extends Extension {
         const width = side === 'left' ? leftWidth : rightWidth;
         const height = vertical === 'top' ? topHeight : bottomHeight;
 
+        this._moveResizeAnimated(win, x, y, width, height);
+    }
+
+    _moveResizeDirect(win, actor, x, y, width, height) {
+        this._prepareForResize(win, actor);
         win.move_resize_frame(true, x, y, width, height);
+    }
+
+    _moveResizeAnimated(win, x, y, width, height) {
+        const actor = win.get_compositor_private();
+        const oldRect = win.get_frame_rect();
+
+        if (!actor ||
+            oldRect.width <= 0 ||
+            oldRect.height <= 0) {
+            this._moveResizeDirect(win, actor, x, y, width, height);
+            return;
+        }
+
+        this._finishTileAnimation(actor);
+
+        let clone = null;
+        const originalOpacity = actor.opacity;
+
+        try {
+            const content = actor.paint_to_content(oldRect);
+            if (!content) {
+                this._moveResizeDirect(win, actor, x, y, width, height);
+                return;
+            }
+
+            clone = new St.Widget({content});
+            clone.set_offscreen_redirect(Clutter.OffscreenRedirect.ALWAYS);
+            clone.set_pivot_point(0, 0);
+            clone.set_position(oldRect.x, oldRect.y);
+            clone.set_size(oldRect.width, oldRect.height);
+            Main.uiGroup.add_child(clone);
+
+            actor.opacity = 0;
+            this._tileAnimations.set(actor, {
+                clone,
+                originalOpacity,
+                settleId: 0,
+            });
+        } catch (error) {
+            if (clone)
+                clone.destroy();
+            actor.opacity = originalOpacity;
+            console.error(`Whoosh tile snapshot failed: ${error}`);
+            this._moveResizeDirect(win, actor, x, y, width, height);
+            return;
+        }
+
+        try {
+            this._moveResizeDirect(win, actor, x, y, width, height);
+        } catch (error) {
+            console.error(`Whoosh tile resize failed: ${error}`);
+            this._finishTileAnimation(actor);
+            return;
+        }
+
+        let attempts = 0;
+        const state = this._tileAnimations.get(actor);
+        state.settleId = GLib.timeout_add(
+            GLib.PRIORITY_DEFAULT,
+            TILE_SETTLE_MS,
+            () => {
+                const current = this._tileAnimations.get(actor);
+                if (!current || current.clone !== clone)
+                    return GLib.SOURCE_REMOVE;
+
+                const targetRect = win.get_frame_rect();
+                const reachedTarget =
+                    Math.abs(targetRect.x - x) <= 2 &&
+                    Math.abs(targetRect.y - y) <= 2 &&
+                    Math.abs(targetRect.width - width) <= 2 &&
+                    Math.abs(targetRect.height - height) <= 2;
+
+                if (!reachedTarget && attempts++ < TILE_SETTLE_ATTEMPTS)
+                    return GLib.SOURCE_CONTINUE;
+
+                current.settleId = 0;
+
+                if (!reachedTarget ||
+                    targetRect.width <= 0 ||
+                    targetRect.height <= 0 ||
+                    !actor.is_mapped()) {
+                    this._finishTileAnimation(actor);
+                    return GLib.SOURCE_REMOVE;
+                }
+
+                try {
+                    const scaleX = targetRect.width / oldRect.width;
+                    const scaleY = targetRect.height / oldRect.height;
+
+                    actor.remove_all_transitions();
+                    actor.set_pivot_point(0, 0);
+                    actor.translation_x = oldRect.x - targetRect.x;
+                    actor.translation_y = oldRect.y - targetRect.y;
+                    actor.scale_x = 1 / scaleX;
+                    actor.scale_y = 1 / scaleY;
+                    actor.opacity = originalOpacity;
+
+                    clone.ease({
+                        x: targetRect.x,
+                        y: targetRect.y,
+                        scale_x: scaleX,
+                        scale_y: scaleY,
+                        opacity: 0,
+                        duration: TILE_ANIMATION_MS,
+                        mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+                    });
+
+                    actor.ease({
+                        scale_x: 1,
+                        scale_y: 1,
+                        translation_x: 0,
+                        translation_y: 0,
+                        duration: TILE_ANIMATION_MS,
+                        mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+                        onStopped: () => this._finishTileAnimation(actor),
+                    });
+                } catch (error) {
+                    console.error(`Whoosh tile animation failed: ${error}`);
+                    this._finishTileAnimation(actor);
+                }
+
+                return GLib.SOURCE_REMOVE;
+            }
+        );
+    }
+
+    _finishTileAnimation(actor) {
+        const state = this._tileAnimations?.get(actor);
+        if (!state)
+            return;
+
+        if (state.settleId)
+            GLib.source_remove(state.settleId);
+
+        actor.remove_all_transitions();
+        actor.set_pivot_point(0, 0);
+        actor.scale_x = 1;
+        actor.scale_y = 1;
+        actor.translation_x = 0;
+        actor.translation_y = 0;
+        actor.opacity = state.originalOpacity;
+
+        if (state.clone)
+            state.clone.destroy();
+
+        this._tileAnimations.delete(actor);
     }
 
     _maximize(win) {
