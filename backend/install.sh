@@ -33,6 +33,7 @@ sudo install -m 0644 \
     /etc/systemd/system/whoosh-backend.service
 
 sudo systemctl daemon-reload
-sudo systemctl enable --now whoosh-backend.service
+sudo systemctl enable whoosh-backend.service
+sudo systemctl restart whoosh-backend.service
 
 echo "Whoosh backend installed and running."
