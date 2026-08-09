@@ -5,12 +5,14 @@
 // Do NOT upload to extensions.gnome.org (EGO) unless you understand JavaScript
 // and can maintain this code.
 
+import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 
 const TITLEBAR_HEIGHT = 56;
 const CORNER_CHAIN_US = 850_000;
+const TILE_ANIMATION_MS = 250;
 
 const BUS_NAME = 'io.github.eshanagarwal05.Whoosh';
 const OBJECT_PATH = '/io/github/eshanagarwal05/Whoosh';
@@ -19,6 +21,7 @@ const INTERFACE_NAME = 'io.github.eshanagarwal05.Whoosh';
 export default class WhooshExtension extends Extension {
     enable() {
         this._lastHorizontal = null;
+        this._scrollTarget = null;
         this._pinchTarget = null;
 
         this._dbusSignalId = Gio.DBus.system.signal_subscribe(
@@ -42,12 +45,25 @@ export default class WhooshExtension extends Extension {
         }
 
         this._lastHorizontal = null;
+        this._scrollTarget = null;
         this._pinchTarget = null;
     }
 
     _handleAction(action) {
         const now = GLib.get_monotonic_time();
         const time = global.display.get_current_time();
+
+        if (action === 'scroll_begin') {
+            const [px, py] = global.get_pointer();
+            const win = this._getWindowUnderPointer(px, py);
+
+            // Lock the topmost title-bar window at the START of each
+            // two-finger scroll gesture. This prevents a tile operation from
+            // exposing a window underneath and accidentally retargeting it.
+            this._scrollTarget =
+                win && this._isInGestureZone(win, px, py) ? win : null;
+            return;
+        }
 
         if (action === 'pinch_begin') {
             const [px, py] = global.get_pointer();
@@ -94,14 +110,16 @@ export default class WhooshExtension extends Extension {
         }
 
         const [px, py] = global.get_pointer();
-        const win = this._getWindowUnderPointer(px, py);
+        const win = this._scrollTarget ?? this._getWindowUnderPointer(px, py);
 
-        if (!win) {
+        if (!win || win.is_hidden()) {
             this._clearExpiredHorizontal(now);
             return;
         }
 
-        if (!this._isInGestureZone(win, px, py)) {
+        // For backends older than Whoosh 1.1, where scroll_begin is not
+        // available, retain the pointer/title-bar check.
+        if (!this._scrollTarget && !this._isInGestureZone(win, px, py)) {
             this._clearExpiredHorizontal(now);
             return;
         }
@@ -154,9 +172,11 @@ export default class WhooshExtension extends Extension {
         }
 
         const [px, py] = global.get_pointer();
-        const win = this._getWindowUnderPointer(px, py);
+        const win = this._scrollTarget ?? this._getWindowUnderPointer(px, py);
 
-        if (win && this._isInGestureZone(win, px, py)) {
+        if (win &&
+            !win.is_hidden() &&
+            (this._scrollTarget || this._isInGestureZone(win, px, py))) {
             this._tileCorner(win, side, vertical);
             this._activate(win, time);
             this._lastHorizontal = null;
@@ -232,10 +252,16 @@ export default class WhooshExtension extends Extension {
         const rightWidth = area.width - leftWidth;
 
         if (side === 'left') {
-            win.move_resize_frame(true, area.x, area.y, leftWidth, area.height);
+            this._moveResizeAnimated(
+                win,
+                area.x,
+                area.y,
+                leftWidth,
+                area.height
+            );
         } else {
-            win.move_resize_frame(
-                true,
+            this._moveResizeAnimated(
+                win,
                 area.x + leftWidth,
                 area.y,
                 rightWidth,
@@ -258,7 +284,68 @@ export default class WhooshExtension extends Extension {
         const width = side === 'left' ? leftWidth : rightWidth;
         const height = vertical === 'top' ? topHeight : bottomHeight;
 
+        this._moveResizeAnimated(win, x, y, width, height);
+    }
+
+    _moveResizeAnimated(win, x, y, width, height) {
+        const oldRect = win.get_frame_rect();
+        const actor = win.get_compositor_private();
+
+        // Mutter owns the actual window geometry. Clutter owns the visual
+        // actor, so use a FLIP-style transform: commit final geometry first,
+        // then visually transform the final actor back to the old frame and
+        // ease that transform to identity.
         win.move_resize_frame(true, x, y, width, height);
+
+        if (!actor)
+            return;
+
+        GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+            if (!actor.is_mapped())
+                return GLib.SOURCE_REMOVE;
+
+            const newRect = win.get_frame_rect();
+            if (newRect.width <= 0 || newRect.height <= 0)
+                return GLib.SOURCE_REMOVE;
+
+            const scaleX = oldRect.width / newRect.width;
+            const scaleY = oldRect.height / newRect.height;
+            const translateX = oldRect.x - newRect.x;
+            const translateY = oldRect.y - newRect.y;
+
+            if (Math.abs(scaleX - 1) < 0.001 &&
+                Math.abs(scaleY - 1) < 0.001 &&
+                Math.abs(translateX) < 0.5 &&
+                Math.abs(translateY) < 0.5) {
+                return GLib.SOURCE_REMOVE;
+            }
+
+            for (const transition of [
+                'translation-x',
+                'translation-y',
+                'scale-x',
+                'scale-y',
+            ]) {
+                actor.remove_transition(transition);
+            }
+
+            actor.set_pivot_point(0, 0);
+            actor.translation_x = translateX;
+            actor.translation_y = translateY;
+            actor.scale_x = scaleX;
+            actor.scale_y = scaleY;
+
+            actor.ease({
+                translation_x: 0,
+                translation_y: 0,
+                scale_x: 1,
+                scale_y: 1,
+                duration: TILE_ANIMATION_MS,
+                mode: Clutter.AnimationMode.EASE_OUT_CUBIC,
+            });
+
+            return GLib.SOURCE_REMOVE;
+        });
     }
 
     _maximize(win) {
