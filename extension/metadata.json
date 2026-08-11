@@ -1,10 +1,10 @@
 {
   "uuid": "whoosh@eshanagarwal05.github.io",
   "name": "Whoosh",
-  "description": "Two-finger title-bar gestures for GNOME. Swipe left/right to tile, swipe up to maximize, swipe down to minimize, pinch in to close, pinch out for fullscreen, and chain directions to tile corners.\n\nRequires the Whoosh backend from the project repository.",
+  "description": "Two-finger window and GNOME dash gestures for GNOME Shell. Swipe title bars to tile, maximize, or minimize; pinch to close or fullscreen. Over dash apps, swipe up to maximize the preferred window, swipe down to minimize all windows, pinch in to quit, and pinch out to open a new window on a new workspace.\\n\\nRequires the Whoosh backend from the project repository.",
   "shell-version": [
     "50"
   ],
   "url": "https://github.com/eshanagarwal05/whoosh",
-  "version-name": "1.7.0"
+  "version-name": "1.8.1"
 }

@@ -1,6 +1,6 @@
 # Whoosh
 
-Whoosh brings two-finger, title-bar-first window gestures to GNOME Shell 50.
+Whoosh brings two-finger window and GNOME dash gestures to GNOME Shell 50.
 
 ## Gestures
 
@@ -16,6 +16,18 @@ Whoosh brings two-finger, title-bar-first window gestures to GNOME Shell 50.
 | Left → Down | Bottom-left quarter |
 | Right → Up | Top-right quarter |
 | Right → Down | Bottom-right quarter |
+
+### GNOME dash and Dash to Dock
+
+| Gesture over a dash app | Action |
+|---|---|
+| Two-finger swipe up | Maximize the preferred app window |
+| Two-finger swipe down | Minimize all app windows |
+| Pinch in | Quit the app; force quit if it was not the active app |
+| Pinch out | Open a new window in a new workspace |
+
+Swipe up chooses a window in this order: focused, non-focused, minimized, then
+a new window. Within each category, the most recently used window wins.
 
 Whoosh targets the topmost visible window under the pointer, even if it is not
 focused. Actions that leave the window visible focus it afterward. Minimize and

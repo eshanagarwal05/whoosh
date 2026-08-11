@@ -8,6 +8,7 @@
 import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
+import Shell from 'gi://Shell';
 import St from 'gi://St';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
@@ -31,8 +32,19 @@ export default class WhooshExtension extends Extension {
         this._lastHorizontal = null;
         this._scrollTarget = null;
         this._pinchTarget = null;
+        this._scrollAppTarget = null;
+        this._pinchAppTarget = null;
         this._tileAnimations = new Map();
         this._resizeGuards = new Map();
+        this._pendingAppLaunches = new Set();
+        this._windowTracker = Shell.WindowTracker.get_default();
+        this._lastFocusedApp = null;
+        this._lastFocusedWindow = null;
+        this._focusWindowSignalId = global.display.connect(
+            'notify::focus-window',
+            () => this._rememberFocusedApp()
+        );
+        this._rememberFocusedApp();
         this._suppressionArmed = null;
         this._suppressionLastSignal = 0;
         this._suppressionPollId = GLib.timeout_add(
@@ -71,6 +83,14 @@ export default class WhooshExtension extends Extension {
             this._dbusSignalId = 0;
         }
 
+        if (this._focusWindowSignalId) {
+            global.display.disconnect(this._focusWindowSignalId);
+            this._focusWindowSignalId = 0;
+        }
+
+        for (const cancel of [...this._pendingAppLaunches])
+            cancel();
+
         for (const win of [...this._resizeGuards.keys()])
             this._cancelResizeGuard(win);
 
@@ -80,6 +100,12 @@ export default class WhooshExtension extends Extension {
         this._lastHorizontal = null;
         this._scrollTarget = null;
         this._pinchTarget = null;
+        this._scrollAppTarget = null;
+        this._pinchAppTarget = null;
+        this._lastFocusedApp = null;
+        this._lastFocusedWindow = null;
+        this._windowTracker = null;
+        this._pendingAppLaunches.clear();
         this._tileAnimations.clear();
         this._resizeGuards.clear();
     }
@@ -90,8 +116,16 @@ export default class WhooshExtension extends Extension {
 
         if (action === 'scroll_begin') {
             const [px, py] = global.get_pointer();
-            const win = this._getWindowUnderPointer(px, py);
+            const app = this._getDashAppUnderPointer(px, py);
 
+            this._scrollAppTarget = app;
+
+            if (app) {
+                this._scrollTarget = null;
+                return;
+            }
+
+            const win = this._getWindowUnderPointer(px, py);
             this._scrollTarget =
                 win && this._isInGestureZone(win, px, py) ? win : null;
             return;
@@ -99,17 +133,37 @@ export default class WhooshExtension extends Extension {
 
         if (action === 'pinch_begin') {
             const [px, py] = global.get_pointer();
-            const win = this._getWindowUnderPointer(px, py);
+            const app = this._getDashAppUnderPointer(px, py);
 
+            this._pinchAppTarget = app;
+
+            if (app) {
+                this._pinchTarget = null;
+                return;
+            }
+
+            const win = this._getWindowUnderPointer(px, py);
             this._pinchTarget =
                 win && this._isInGestureZone(win, px, py) ? win : null;
             return;
         }
 
         if (action === 'pinch_in' || action === 'pinch_out') {
+            const app = this._pinchAppTarget;
+            this._pinchAppTarget = null;
+            this._lastHorizontal = null;
+
+            if (app) {
+                if (action === 'pinch_in')
+                    this._quitDashApp(app);
+                else
+                    this._openDashAppInNewWorkspace(app, time);
+
+                return;
+            }
+
             const win = this._pinchTarget;
             this._pinchTarget = null;
-            this._lastHorizontal = null;
 
             if (!win || win.is_hidden())
                 return;
@@ -121,6 +175,20 @@ export default class WhooshExtension extends Extension {
                 this._activate(win, time);
             }
 
+            return;
+        }
+
+        if (this._scrollAppTarget) {
+            const app = this._scrollAppTarget;
+            this._lastHorizontal = null;
+
+            if (action === 'up')
+                this._maximizeDashApp(app, time);
+            else if (action === 'down')
+                this._minimizeDashApp(app);
+
+            // Keep the target until the next scroll_begin so any corner
+            // follow-up from the same physical gesture is consumed here too.
             return;
         }
 
@@ -262,6 +330,299 @@ export default class WhooshExtension extends Extension {
             py < rect.y + Math.min(TITLEBAR_HEIGHT, rect.height);
     }
 
+
+    _getDashAppUnderPointer(px, py) {
+        let actor = global.stage.get_actor_at_pos(
+            Clutter.PickMode.REACTIVE,
+            px,
+            py
+        );
+
+        if (!actor)
+            return null;
+
+        let app = null;
+        let isDash = false;
+
+        while (actor) {
+            if (!app) {
+                const candidate =
+                    actor.app ??
+                    actor._delegate?.app ??
+                    null;
+
+                if (candidate &&
+                    typeof candidate.get_windows === 'function') {
+                    app = candidate;
+                }
+            }
+
+            const name =
+                actor.get_name?.() ??
+                actor.name ??
+                '';
+
+            if (name === 'dash' ||
+                name === 'dashtodockContainer' ||
+                name === 'dashtodockDashContainer' ||
+                name === 'dashtodockDashScrollview' ||
+                name === 'dashtodockBoxContainer') {
+                isDash = true;
+            }
+
+            if (app && isDash)
+                return app;
+
+            actor = actor.get_parent();
+        }
+
+        return null;
+    }
+
+    _rememberFocusedApp() {
+        const win = global.display.get_focus_window();
+        if (!win || !this._windowTracker)
+            return;
+
+        const app = this._windowTracker.get_window_app(win);
+        if (app) {
+            this._lastFocusedApp = app;
+            this._lastFocusedWindow = win;
+        }
+    }
+
+    _sameApp(first, second) {
+        if (!first || !second)
+            return false;
+
+        return first === second || first.get_id() === second.get_id();
+    }
+
+    _getAppWindowsByRecency(app) {
+        return app.get_windows()
+            .filter(win => !win.is_skip_taskbar())
+            .sort((first, second) => {
+                const firstTime = first.get_user_time();
+                const secondTime = second.get_user_time();
+
+                if (firstTime === secondTime) {
+                    return second.get_stable_sequence() -
+                        first.get_stable_sequence();
+                }
+
+                return global.display.xserver_time_is_before(
+                    firstTime,
+                    secondTime
+                ) ? 1 : -1;
+            });
+    }
+
+    _watchForNewAppWindow(app, existing, callback) {
+        let signalId = 0;
+        let timeoutId = 0;
+        let done = false;
+
+        const cancel = () => {
+            if (done)
+                return;
+
+            done = true;
+
+            if (signalId) {
+                app.disconnect(signalId);
+                signalId = 0;
+            }
+
+            if (timeoutId) {
+                GLib.source_remove(timeoutId);
+                timeoutId = 0;
+            }
+
+            this._pendingAppLaunches?.delete(cancel);
+        };
+
+        const check = () => {
+            if (done)
+                return;
+
+            const win = app.get_windows().find(candidate =>
+                !existing.has(candidate) &&
+                !candidate.is_skip_taskbar()
+            );
+
+            if (!win)
+                return;
+
+            cancel();
+            callback(win);
+        };
+
+        signalId = app.connect('windows-changed', check);
+        timeoutId = GLib.timeout_add_once(
+            GLib.PRIORITY_DEFAULT,
+            5000,
+            () => {
+                timeoutId = 0;
+                cancel();
+            }
+        );
+
+        this._pendingAppLaunches.add(cancel);
+        return cancel;
+    }
+
+    _openNewAppWindow(app, workspaceIndex, callback) {
+        if (!app.can_open_new_window())
+            return false;
+
+        const existing = new Set(app.get_windows());
+        const cancel = this._watchForNewAppWindow(
+            app,
+            existing,
+            callback
+        );
+
+        try {
+            app.open_new_window(workspaceIndex);
+            return true;
+        } catch (error) {
+            cancel();
+            console.error(
+                `Whoosh could not open a new ${app.get_name()} window: ${error}`
+            );
+            return false;
+        }
+    }
+
+    _maximizeDashApp(app, time) {
+        const windows = this._getAppWindowsByRecency(app);
+        const rememberedFocused =
+            this._sameApp(app, this._lastFocusedApp) &&
+            windows.includes(this._lastFocusedWindow)
+                ? this._lastFocusedWindow
+                : null;
+        const focused = windows.find(win =>
+            win.has_focus() && win.can_maximize()
+        ) ?? (
+            rememberedFocused?.can_maximize()
+                ? rememberedFocused
+                : null
+        );
+        const nonFocused = windows.find(win =>
+            win !== focused &&
+            !win.minimized &&
+            win.can_maximize()
+        );
+        const minimized = windows.find(win =>
+            win.minimized && win.can_maximize()
+        );
+        const win = focused ?? nonFocused ?? minimized;
+
+        if (win) {
+            if (win.minimized)
+                win.unminimize();
+
+            this._maximize(win);
+            Main.overview.hide();
+            this._activate(win, time);
+            return;
+        }
+
+        const opened = this._openNewAppWindow(app, -1, newWin => {
+            if (newWin.minimized)
+                newWin.unminimize();
+
+            this._maximize(newWin);
+            Main.overview.hide();
+            this._activate(
+                newWin,
+                global.display.get_current_time()
+            );
+        });
+
+        if (!opened) {
+            console.warn(
+                `Whoosh: ${app.get_name()} cannot open another window`
+            );
+        }
+    }
+
+    _minimizeDashApp(app) {
+        for (const win of this._getAppWindowsByRecency(app))
+            this._minimize(win);
+    }
+
+    _quitDashApp(app) {
+        this._rememberFocusedApp();
+
+        if (this._sameApp(app, this._lastFocusedApp)) {
+            app.request_quit();
+            return;
+        }
+
+        const killedPids = new Set();
+        let killed = false;
+
+        for (const win of this._getAppWindowsByRecency(app)) {
+            const pid = win.get_pid();
+
+            if (pid > 0 && killedPids.has(pid))
+                continue;
+
+            try {
+                win.kill();
+                killed = true;
+
+                if (pid > 0)
+                    killedPids.add(pid);
+            } catch (error) {
+                console.error(
+                    `Whoosh could not force quit ${app.get_name()}: ${error}`
+                );
+            }
+        }
+
+        if (!killed)
+            app.request_quit();
+    }
+
+    _openDashAppInNewWorkspace(app, time) {
+        if (!app.can_open_new_window()) {
+            console.warn(
+                `Whoosh: ${app.get_name()} cannot open another window`
+            );
+            return;
+        }
+
+        const workspace =
+            global.workspace_manager.append_new_workspace(true, time);
+
+        const opened = this._openNewAppWindow(
+            app,
+            workspace.index(),
+            win => {
+                if (!win.located_on_workspace(workspace))
+                    win.change_workspace(workspace);
+
+                if (win.minimized)
+                    win.unminimize();
+
+                this._activate(
+                    win,
+                    global.display.get_current_time()
+                );
+            }
+        );
+
+        if (opened) {
+            Main.overview.hide();
+        } else {
+            console.warn(
+                `Whoosh: failed to open ${app.get_name()} on the new workspace`
+            );
+        }
+    }
+
     _isChromeWindow(win) {
         const sandboxedAppId =
             win.get_sandboxed_app_id()?.toLowerCase() ?? '';
@@ -295,10 +656,14 @@ export default class WhooshExtension extends Extension {
         const [px, py] = global.get_pointer();
         const win = this._getWindowUnderPointer(px, py);
 
+        const dashApp = this._getDashAppUnderPointer(px, py);
         const armed = Boolean(
-            win &&
-            this._isChromeWindow(win) &&
-            this._isInGestureZone(win, px, py)
+            dashApp ||
+            (
+                win &&
+                this._isChromeWindow(win) &&
+                this._isInGestureZone(win, px, py)
+            )
         );
 
         const now = GLib.get_monotonic_time();
