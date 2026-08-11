@@ -238,6 +238,20 @@ class TouchpadProxy:
                 self.send_action("scroll_begin")
                 self.send_action(side)
                 self.log(f"suppressed horizontal action {side}")
+                return
+
+            if ay >= ACTION_MM and ay >= ax * DOMINANCE:
+                vertical = "up" if dy < 0 else "down"
+                self.action_emitted = True
+                # Corner chaining only ever follows a horizontal start;
+                # mark it done so a later vertical wiggle can't be
+                # mistaken for a corner_{side}_{vertical} action.
+                self.corner_emitted = True
+                self.action_time = now
+
+                self.send_action("scroll_begin")
+                self.send_action(vertical)
+                self.log(f"suppressed vertical action {vertical}")
 
             return
 
@@ -300,16 +314,13 @@ class TouchpadProxy:
             ay = abs(dy)
             pinch_delta = abs(distance - self.base_distance)
 
-            if ax >= DIRECTION_MM and ax >= ay * DOMINANCE:
+            if (ax >= DIRECTION_MM and ax >= ay * DOMINANCE) or (
+                ay >= DIRECTION_MM and ay >= ax * DOMINANCE
+            ):
                 self.buffered_packets = []
                 self.candidate = False
                 self.suppressed = True
                 self._maybe_emit_action(centroid)
-                return
-
-            if ay >= DIRECTION_MM and ay >= ax * DOMINANCE:
-                self._replay_buffer()
-                self._reset_candidate()
                 return
 
             if pinch_delta >= PINCH_MM:

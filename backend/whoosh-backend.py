@@ -34,6 +34,8 @@ PROXY_ACTIONS = {
     "scroll_begin",
     "left",
     "right",
+    "up",
+    "down",
     "corner_left_up",
     "corner_left_down",
     "corner_right_up",
