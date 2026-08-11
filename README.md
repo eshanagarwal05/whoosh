@@ -37,6 +37,11 @@ of truth and add a compositor-only visual overlay inspired by GNOME Shell's
 native size-change animation. The overlay never freezes or owns window
 geometry, and animation setup failures fall back to direct tiling.
 
+When tiling begins from a maximized or fullscreen window, Whoosh briefly guards
+the requested geometry while the window's startup state settles. This prevents
+a delayed maximize/configure cycle from overriding an explicit half- or
+quarter-tile gesture.
+
 ## Install the backend
 
 On Fedora:
