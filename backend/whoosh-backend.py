@@ -10,6 +10,7 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
 
 import gi
@@ -28,6 +29,16 @@ CORNER_VERTICAL_THRESHOLD = 50.0
 CORNER_CHAIN_TIMEOUT = 0.30
 PINCH_IN_THRESHOLD = 0.78
 PINCH_OUT_THRESHOLD = 1.35
+
+PROXY_ACTIONS = {
+    "scroll_begin",
+    "left",
+    "right",
+    "corner_left_up",
+    "corner_left_down",
+    "corner_right_up",
+    "corner_right_down",
+}
 
 SCROLL_RE = re.compile(
     r"POINTER_SCROLL_FINGER.*?"
@@ -224,10 +235,29 @@ class GestureRecognizer:
                 self.emit("pinch_out")
 
 
+def _proxy_action_reader(recognizer):
+    for line in sys.stdin:
+        action = line.strip()
+        if action in PROXY_ACTIONS:
+            recognizer.emit(action)
+
+
+def start_proxy_action_reader(recognizer):
+    thread = threading.Thread(
+        target=_proxy_action_reader,
+        args=(recognizer,),
+        daemon=True,
+        name="whoosh-proxy-actions",
+    )
+    thread.start()
+    return thread
+
+
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--device", default=None)
     parser.add_argument("--quiet", action="store_true")
+    parser.add_argument("--proxy-actions-stdin", action="store_true")
     return parser.parse_args()
 
 
@@ -252,6 +282,9 @@ def main():
 
     bus = connect_system_bus()
     recognizer = GestureRecognizer(bus, verbose=not args.quiet)
+
+    if args.proxy_actions_stdin:
+        start_proxy_action_reader(recognizer)
     recognizer.log(f"started device={device}")
 
     process = subprocess.Popen(

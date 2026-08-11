@@ -1,12 +1,13 @@
 [Unit]
-Description=Whoosh touchpad gesture backend
+Description=Whoosh touchpad proxy and gesture backend
 After=dbus.service systemd-udevd.service
 Requires=dbus.socket
 ConditionPathExists=/usr/bin/libinput
+ConditionPathExists=/dev/uinput
 
 [Service]
 Type=simple
-ExecStart=/usr/local/libexec/whoosh-backend.py --quiet
+ExecStart=/usr/local/libexec/whoosh-input-proxy.py
 Restart=on-failure
 RestartSec=2
 NoNewPrivileges=yes

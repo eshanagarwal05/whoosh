@@ -19,6 +19,8 @@ const TILE_SETTLE_MS = 16;
 const TILE_SETTLE_ATTEMPTS = 4;
 const TILE_STATE_GUARD_MS = 600;
 const TILE_STATE_GUARD_INTERVAL_MS = 16;
+const SUPPRESSION_POLL_MS = 30;
+const SUPPRESSION_HEARTBEAT_US = 100_000;
 
 const BUS_NAME = 'io.github.eshanagarwal05.Whoosh';
 const OBJECT_PATH = '/io/github/eshanagarwal05/Whoosh';
@@ -31,6 +33,14 @@ export default class WhooshExtension extends Extension {
         this._pinchTarget = null;
         this._tileAnimations = new Map();
         this._resizeGuards = new Map();
+        this._suppressionArmed = null;
+        this._suppressionLastSignal = 0;
+        this._suppressionPollId = GLib.timeout_add(
+            GLib.PRIORITY_DEFAULT,
+            SUPPRESSION_POLL_MS,
+            () => this._updateSuppressionState()
+        );
+        this._updateSuppressionState();
 
         this._dbusSignalId = Gio.DBus.system.signal_subscribe(
             BUS_NAME,
@@ -47,6 +57,15 @@ export default class WhooshExtension extends Extension {
     }
 
     disable() {
+        if (this._suppressionPollId) {
+            GLib.source_remove(this._suppressionPollId);
+            this._suppressionPollId = 0;
+        }
+
+        this._sendSuppressionState(false);
+        this._suppressionArmed = false;
+        this._suppressionLastSignal = 0;
+
         if (this._dbusSignalId) {
             Gio.DBus.system.signal_unsubscribe(this._dbusSignalId);
             this._dbusSignalId = 0;
@@ -241,6 +260,61 @@ export default class WhooshExtension extends Extension {
             px < rect.x + rect.width &&
             py >= rect.y &&
             py < rect.y + Math.min(TITLEBAR_HEIGHT, rect.height);
+    }
+
+    _isChromeWindow(win) {
+        const sandboxedAppId =
+            win.get_sandboxed_app_id()?.toLowerCase() ?? '';
+        const wmClass =
+            win.get_wm_class()?.toLowerCase() ?? '';
+        const wmInstance =
+            win.get_wm_class_instance()?.toLowerCase() ?? '';
+
+        return sandboxedAppId === 'com.google.chrome' ||
+            wmClass === 'google-chrome' ||
+            wmClass.startsWith('google-chrome-') ||
+            wmInstance === 'google-chrome' ||
+            wmInstance.startsWith('google-chrome-');
+    }
+
+    _sendSuppressionState(armed) {
+        try {
+            Gio.DBus.system.emit_signal(
+                null,
+                OBJECT_PATH,
+                INTERFACE_NAME,
+                'Suppression',
+                new GLib.Variant('(b)', [armed])
+            );
+        } catch (error) {
+            console.error(`Whoosh suppression signal failed: ${error}`);
+        }
+    }
+
+    _updateSuppressionState() {
+        const [px, py] = global.get_pointer();
+        const win = this._getWindowUnderPointer(px, py);
+
+        const armed = Boolean(
+            win &&
+            this._isChromeWindow(win) &&
+            this._isInGestureZone(win, px, py)
+        );
+
+        const now = GLib.get_monotonic_time();
+        const stateChanged = armed !== this._suppressionArmed;
+        const heartbeatDue =
+            armed &&
+            now - this._suppressionLastSignal >=
+                SUPPRESSION_HEARTBEAT_US;
+
+        if (stateChanged || heartbeatDue) {
+            this._sendSuppressionState(armed);
+            this._suppressionLastSignal = now;
+        }
+
+        this._suppressionArmed = armed;
+        return GLib.SOURCE_CONTINUE;
     }
 
     _activate(win, time) {
