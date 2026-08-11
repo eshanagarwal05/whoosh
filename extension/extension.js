@@ -17,6 +17,8 @@ const CORNER_CHAIN_US = 300_000;
 const TILE_ANIMATION_MS = 250;
 const TILE_SETTLE_MS = 16;
 const TILE_SETTLE_ATTEMPTS = 4;
+const TILE_STATE_GUARD_MS = 600;
+const TILE_STATE_GUARD_INTERVAL_MS = 16;
 
 const BUS_NAME = 'io.github.eshanagarwal05.Whoosh';
 const OBJECT_PATH = '/io/github/eshanagarwal05/Whoosh';
@@ -28,6 +30,7 @@ export default class WhooshExtension extends Extension {
         this._scrollTarget = null;
         this._pinchTarget = null;
         this._tileAnimations = new Map();
+        this._resizeGuards = new Map();
 
         this._dbusSignalId = Gio.DBus.system.signal_subscribe(
             BUS_NAME,
@@ -49,6 +52,9 @@ export default class WhooshExtension extends Extension {
             this._dbusSignalId = 0;
         }
 
+        for (const win of [...this._resizeGuards.keys()])
+            this._cancelResizeGuard(win);
+
         for (const actor of [...this._tileAnimations.keys()])
             this._finishTileAnimation(actor);
 
@@ -56,6 +62,7 @@ export default class WhooshExtension extends Extension {
         this._scrollTarget = null;
         this._pinchTarget = null;
         this._tileAnimations.clear();
+        this._resizeGuards.clear();
     }
 
     _handleAction(action) {
@@ -295,9 +302,118 @@ export default class WhooshExtension extends Extension {
         this._moveResizeAnimated(win, x, y, width, height);
     }
 
+    _cancelResizeGuard(win) {
+        const state = this._resizeGuards?.get(win);
+        if (!state)
+            return false;
+
+        state.cancelled = true;
+
+        if (state.timeoutId) {
+            GLib.source_remove(state.timeoutId);
+            state.timeoutId = 0;
+        }
+
+        this._resizeGuards.delete(win);
+        return true;
+    }
+
+    _startResizeGuard(win, x, y, width, height) {
+        const state = {
+            timeoutId: 0,
+            cancelled: false,
+            deadline:
+                GLib.get_monotonic_time() +
+                TILE_STATE_GUARD_MS * 1000,
+        };
+
+        this._resizeGuards.set(win, state);
+
+        state.timeoutId = GLib.timeout_add(
+            GLib.PRIORITY_DEFAULT,
+            TILE_STATE_GUARD_INTERVAL_MS,
+            () => {
+                if (state.cancelled ||
+                    this._resizeGuards?.get(win) !== state) {
+                    state.timeoutId = 0;
+                    return GLib.SOURCE_REMOVE;
+                }
+
+                if (GLib.get_monotonic_time() >= state.deadline) {
+                    state.timeoutId = 0;
+                    this._resizeGuards.delete(win);
+                    return GLib.SOURCE_REMOVE;
+                }
+
+                try {
+                    if (win.is_hidden()) {
+                        state.timeoutId = 0;
+                        this._resizeGuards.delete(win);
+                        return GLib.SOURCE_REMOVE;
+                    }
+
+                    const actor = win.get_compositor_private();
+                    const fullscreen = win.is_fullscreen();
+
+                    if (fullscreen) {
+                        if (actor)
+                            Main.wm.skipNextEffect(actor);
+
+                        win.unmake_fullscreen();
+                    }
+
+                    const maximizeFlags = win.get_maximize_flags();
+
+                    if (maximizeFlags) {
+                        if (actor)
+                            Main.wm.skipNextEffect(actor);
+
+                        win.unmaximize(maximizeFlags);
+                    }
+
+                    const rect = win.get_frame_rect();
+                    const wrongGeometry =
+                        Math.abs(rect.x - x) > 2 ||
+                        Math.abs(rect.y - y) > 2 ||
+                        Math.abs(rect.width - width) > 2 ||
+                        Math.abs(rect.height - height) > 2;
+
+                    if (fullscreen || maximizeFlags || wrongGeometry) {
+                        win.move_resize_frame(
+                            true,
+                            x,
+                            y,
+                            width,
+                            height
+                        );
+                    }
+                } catch (error) {
+                    console.error(
+                        `Whoosh tile state guard failed: ${error}`
+                    );
+
+                    state.timeoutId = 0;
+                    this._resizeGuards.delete(win);
+                    return GLib.SOURCE_REMOVE;
+                }
+
+                return GLib.SOURCE_CONTINUE;
+            }
+        );
+    }
+
     _moveResizeDirect(win, actor, x, y, width, height) {
+        const hadGuard = this._cancelResizeGuard(win);
+        const needsGuard =
+            hadGuard ||
+            win.is_fullscreen() ||
+            Boolean(win.get_maximize_flags());
+
         this._prepareForResize(win, actor);
         win.move_resize_frame(true, x, y, width, height);
+
+        if (needsGuard)
+            this._startResizeGuard(win, x, y, width, height);
     }
 
     _moveResizeAnimated(win, x, y, width, height) {
@@ -447,6 +563,8 @@ export default class WhooshExtension extends Extension {
     }
 
     _maximize(win) {
+        this._cancelResizeGuard(win);
+
         if (win.is_fullscreen())
             win.unmake_fullscreen();
 
@@ -455,16 +573,22 @@ export default class WhooshExtension extends Extension {
     }
 
     _fullscreen(win) {
+        this._cancelResizeGuard(win);
+
         if (!win.is_fullscreen())
             win.make_fullscreen();
     }
 
     _minimize(win) {
+        this._cancelResizeGuard(win);
+
         if (win.can_minimize())
             win.minimize();
     }
 
     _close(win, time) {
+        this._cancelResizeGuard(win);
+
         if (win.can_close())
             win.delete(time);
     }
