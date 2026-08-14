@@ -46,8 +46,7 @@ const THROW_REARM_MAX_IMPULSE = 500;
 const THROW_REARM_SETTLE_US = 100_000;
 const MIN_REVERSAL_SLOW_SPEED = 180;
 const MIN_REVERSAL_FAST_SPEED = 700;
-const MIN_REVERSAL_ALIGNMENT = -0.18;const MIN_OUTRIGHT_FAST_SPEED = 2200;
-const MIN_OUTRIGHT_IMPULSE = 600;
+const MIN_REVERSAL_ALIGNMENT = -0.18;
 
 const STRAIGHT_RATIO = 0.42;
 
@@ -64,8 +63,6 @@ export class TouchscreenThrowController {
         this._capturedEventId = 0;
         this._touchEventId = 0;
         this._inputGrab = null;
-        this._grabBeginId = 0;
-        this._grabEndId = 0;
         this._applySources = new Set();
 
         this._releaseInputGrab();
@@ -766,7 +763,6 @@ export class TouchscreenThrowController {
                     pending.candidate,
                     now
                 );
-            } else {
             }
         }
 
@@ -895,9 +891,6 @@ export class TouchscreenThrowController {
             cancelled: false,
             finished: false,
             outcome: null,
-
-            grabBeginSeen: false,
-            grabEndSeen: false,
 
             samples: [],
             events: [],
