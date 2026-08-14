@@ -44,30 +44,9 @@ const THROW_MIN_PEAK_RATIO = 1.55;
 const THROW_REARM_MAX_FAST = 900;
 const THROW_REARM_MAX_IMPULSE = 500;
 const THROW_REARM_SETTLE_US = 100_000;
-
-
-const CANDIDATE_MIN_AGE_US = 28_000;
-const CANDIDATE_MAX_AGE_US = 100_000;
-const CANDIDATE_MIN_TRAVEL = 32;
-const CANDIDATE_MIN_HITS = 4;
-const CANDIDATE_MIN_SPEED = 850;
-
-const OBVIOUS_MIN_AGE_US = 16_000;
-const OBVIOUS_MIN_TRAVEL = 36;
-const OBVIOUS_MIN_SPEED = 2600;
-
 const MIN_REVERSAL_SLOW_SPEED = 180;
 const MIN_REVERSAL_FAST_SPEED = 700;
-const MIN_REVERSAL_ALIGNMENT = -0.18;
-
-const MIN_FROM_REST_FAST_SPEED = 1200;
-const MIN_FROM_REST_IMPULSE = 750;
-
-const MIN_ACCEL_FAST_SPEED = 950;
-const MIN_ACCEL_IMPULSE = 650;
-const MIN_ACCEL_RATIO = 1.45;
-
-const MIN_OUTRIGHT_FAST_SPEED = 2200;
+const MIN_REVERSAL_ALIGNMENT = -0.18;const MIN_OUTRIGHT_FAST_SPEED = 2200;
 const MIN_OUTRIGHT_IMPULSE = 600;
 
 const STRAIGHT_RATIO = 0.42;
@@ -274,7 +253,7 @@ export class TouchscreenThrowController {
          * immediately after the first one.
          *
          * Real touchscreen samples are normally several milliseconds
-         * apart, while the duplicates in our diagnostics are only about
+         * apart, while duplicate deliveries observed during testing are only about
          * 0.05-0.2 ms apart.
          */
         if (session.lastHandledTouchUs !== undefined) {
@@ -521,7 +500,7 @@ export class TouchscreenThrowController {
     _handleTouchFinish(event, cancelled) {
         /*
          * Input safety comes first. Never leave a Clutter grab
-         * alive while doing gesture cleanup or diagnostics.
+         * alive while doing gesture cleanup.
          */
         this._releaseInputGrab();
 
@@ -1796,137 +1775,10 @@ export class TouchscreenThrowController {
 
         session.finished = true;
 
-        let pathDistance = 0;
-
-        for (let i = 1; i < session.samples.length; i++) {
-            const previous = session.samples[i - 1];
-            const current = session.samples[i];
-
-            pathDistance += Math.hypot(
-                current.x - previous.x,
-                current.y - previous.y
-            );
-        }
-
-        let finalRect = null;
-
-        if (session.window &&
-            !session.window.is_hidden()) {
-            const rect =
-                session.window.get_frame_rect();
-
-            finalRect = {
-                x: rect.x,
-                y: rect.y,
-                width: rect.width,
-                height: rect.height,
-            };
-        }
-
-        const record = {
-            schema: session.schema,
-            gestureId: session.gestureId,
-            wallTime: session.wallTime,
-
-            window: {
-                stableSequence:
-                    session.window?.get_stable_sequence?.() ?? null,
-                wmClass:
-                    session.window?.get_wm_class?.() ?? '',
-                sandboxedAppId:
-                    session.window?.get_sandboxed_app_id?.() ?? '',
-            },
-
-            initialRect: session.initialRect,
-            finalRect,
-
-            durationMs:
-                session.durationMs ??
-                (
-                    (
-                        GLib.get_monotonic_time() -
-                        session.startedAtUs
-                    ) /
-                    1000
-                ),
-
-            sampleCount:
-                session.samples.length,
-
-            pathDistance,
-
-            motion: {
-                maxFastSpeed:
-                    session.motion.maxFastSpeed,
-                maxSlowSpeed:
-                    session.motion.maxSlowSpeed,
-                maxImpulse:
-                    session.motion.maxImpulse,
-                minAlignment:
-                    session.motion.minAlignment,
-                reversalSeen:
-                    session.motion.reversalSeen,
-                gapCount:
-                    session.motion.gapCount,
-            },
-
-            triggerReason:
-                session.triggerReason,
-
-            committedAction:
-                session.committedAction,
-
-            appliedAction:
-                session.appliedAction,
-
-            commitToApplyMs:
-                session.appliedAtUs &&
-                session.events.find(
-                    event =>
-                        event.type === 'commit'
-                )
-                    ? (
-                        session.appliedAtUs -
-                        (
-                            session.startedAtUs +
-                            session.events.find(
-                                event =>
-                                    event.type === 'commit'
-                            ).dtMs * 1000
-                        )
-                    ) / 1000
-                    : null,
-
-            grabBeginSeen:
-                session.grabBeginSeen,
-
-            grabEndSeen:
-                session.grabEndSeen,
-
-            cancelled:
-                session.cancelled,
-
-            outcome:
-                session.outcome ??
-                (
-                    session.appliedAction
-                        ? 'applied'
-                        : session.committedAction
-                            ? 'commit-not-applied'
-                            : 'missed'
-                ),
-
-            events:
-                session.events,
-
-            samples:
-                session.samples,
-        };
-
-
-        // Do not retain Meta.Window or EventSequence references after logging.
+        // Do not retain native objects after the gesture finishes.
         session.window = null;
         session.sequence = null;
     }
+
 }
 
