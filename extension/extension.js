@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Eshan Agarwal
 //
-// Whoosh was developed with AI assistance.
-// Do NOT upload to extensions.gnome.org (EGO) unless you understand JavaScript
-// and can maintain this code.
 
 import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
@@ -12,6 +9,7 @@ import Shell from 'gi://Shell';
 import St from 'gi://St';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+import {TouchscreenThrowController} from './touchscreen.js';
 
 const TITLEBAR_HEIGHT = 56;
 const CORNER_CHAIN_US = 300_000;
@@ -34,6 +32,7 @@ export default class WhooshExtension extends Extension {
         this._pinchTarget = null;
         this._scrollAppTarget = null;
         this._pinchAppTarget = null;
+
         this._tileAnimations = new Map();
         this._resizeGuards = new Map();
         this._pendingAppLaunches = new Set();
@@ -54,6 +53,18 @@ export default class WhooshExtension extends Extension {
         );
         this._updateSuppressionState();
 
+        this._touchscreen = new TouchscreenThrowController({
+            getWindowAt: (x, y) =>
+                this._getWindowUnderPointer(x, y),
+
+            isTitlebar: (win, x, y) =>
+                this._isInTouchGestureZone(win, x, y),
+
+            applyAction: (win, action) =>
+                this._applyTouchAction(win, action),
+        });
+        this._touchscreen.enable();
+
         this._dbusSignalId = Gio.DBus.system.signal_subscribe(
             BUS_NAME,
             INTERFACE_NAME,
@@ -69,6 +80,10 @@ export default class WhooshExtension extends Extension {
     }
 
     disable() {
+        this._touchscreen?.disable();
+        this._touchscreen = null;
+
+
         if (this._suppressionPollId) {
             GLib.source_remove(this._suppressionPollId);
             this._suppressionPollId = 0;
@@ -330,6 +345,77 @@ export default class WhooshExtension extends Extension {
             py < rect.y + Math.min(TITLEBAR_HEIGHT, rect.height);
     }
 
+    _isInTouchGestureZone(win, px, py) {
+        const rect = win.get_frame_rect();
+        const touchHeight = Math.min(48, rect.height);
+
+        //
+        // Keep the ends of the title bar native so touchscreen taps
+        // can reach minimize / maximize / close buttons.
+        //
+        // Whoosh owns the large center section for drag/flick gestures.
+        const decorationReserve =
+            Math.min(
+                180,
+                Math.max(
+                    110,
+                    rect.width * 0.15
+                )
+            );
+
+        const relativeX =
+            px - rect.x;
+
+        const insideHorizontalGestureZone =
+            relativeX >= decorationReserve &&
+            relativeX <
+                rect.width - decorationReserve;
+
+        const insideTitlebar =
+            py >= rect.y &&
+            py < rect.y + touchHeight;
+
+        return insideHorizontalGestureZone &&
+            insideTitlebar;
+    }
+
+    _applyTouchAction(win, action) {
+        if (!win || win.is_hidden())
+            return false;
+
+        switch (action) {
+        case 'left':
+            this._tileHalf(win, 'left');
+            break;
+        case 'right':
+            this._tileHalf(win, 'right');
+            break;
+        case 'maximize':
+            this._maximize(win);
+            break;
+        case 'top-left':
+            this._tileCorner(win, 'left', 'top');
+            break;
+        case 'top-right':
+            this._tileCorner(win, 'right', 'top');
+            break;
+        case 'bottom-left':
+            this._tileCorner(win, 'left', 'bottom');
+            break;
+        case 'bottom-right':
+            this._tileCorner(win, 'right', 'bottom');
+            break;
+        default:
+            return false;
+        }
+
+        this._activate(
+            win,
+            global.display.get_current_time()
+        );
+
+        return true;
+    }
 
     _getDashAppUnderPointer(px, py) {
         let actor = global.stage.get_actor_at_pos(
