@@ -747,7 +747,6 @@ export default class WhooshExtension extends Extension {
             dashApp ||
             (
                 win &&
-                this._isChromeWindow(win) &&
                 this._isInGestureZone(win, px, py)
             )
         );
