@@ -26,10 +26,10 @@ INTERFACE_NAME = "io.github.eshanagarwal05.Whoosh"
 
 DIRECTION_MM = 1.5
 ACTION_MM = 4.5
-CORNER_MM = 4.0
+CORNER_MM = 5.5
 DOMINANCE = 1.10
 PINCH_MM = 1.2
-PINCH_TRANSLATION_RATIO = 0.80
+PINCH_TRANSLATION_RATIO = 1.50
 DECISION_TIMEOUT = 0.12
 CORNER_TIMEOUT = 0.30
 ARM_TTL = 0.25
@@ -381,15 +381,11 @@ class TouchpadProxy:
                 (ax >= DIRECTION_MM and ax >= ay * DOMINANCE) or
                 (ay >= DIRECTION_MM and ay >= ax * DOMINANCE)
             )
-            directional_intent = self.intent_committed or directional_now
             major_move = max(ax, ay)
 
             pinch_is_genuine = (
                 pinch_delta >= PINCH_MM
-                and (
-                    not directional_intent
-                    or pinch_delta >= major_move * PINCH_TRANSLATION_RATIO
-                )
+                and pinch_delta >= major_move * PINCH_TRANSLATION_RATIO
             )
 
             if pinch_is_genuine:
