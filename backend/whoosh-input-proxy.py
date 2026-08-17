@@ -27,8 +27,9 @@ INTERFACE_NAME = "io.github.eshanagarwal05.Whoosh"
 DIRECTION_MM = 1.5
 ACTION_MM = 4.5
 CORNER_MM = 4.0
-DOMINANCE = 1.15
+DOMINANCE = 1.10
 PINCH_MM = 1.2
+PINCH_TRANSLATION_RATIO = 0.80
 DECISION_TIMEOUT = 0.12
 CORNER_TIMEOUT = 0.30
 ARM_TTL = 0.25
@@ -120,9 +121,12 @@ class TouchpadProxy:
 
         self.candidate = False
         self.candidate_started = 0.0
+        self.intent_committed = False
         self.base_centroid = None
         self.base_distance = None
         self.buffered_packets = []
+        self.hidden_slots = set()
+        self.forward_slot = 0
 
         self.suppressed = False
         self.action_emitted = False
@@ -148,6 +152,13 @@ class TouchpadProxy:
                 )
 
         return points
+
+    def _active_slot_ids(self):
+        return {
+            slot_id
+            for slot_id, slot in self.slots.items()
+            if slot.get("tracking_id", -1) >= 0
+        }
 
     def _geometry(self):
         points = self._active_points()
@@ -189,6 +200,46 @@ class TouchpadProxy:
 
     def _forward_packet(self, events):
         for event in events:
+            if (
+                event.type == ecodes.EV_ABS
+                and event.code == ecodes.ABS_MT_SLOT
+            ):
+                self.forward_slot = event.value
+
+            self.ui.write_event(event)
+
+    def _forward_packet_excluding_slots(self, events, hidden_slots):
+        logical_slot = self.forward_slot
+        emitted_slot = self.forward_slot
+
+        for event in events:
+            if (
+                event.type == ecodes.EV_ABS
+                and event.code == ecodes.ABS_MT_SLOT
+            ):
+                logical_slot = event.value
+                continue
+
+            is_mt_slot_data = (
+                event.type == ecodes.EV_ABS
+                and ecodes.ABS_MT_TOUCH_MAJOR
+                    <= event.code
+                    <= ecodes.ABS_MT_TOOL_Y
+            )
+
+            if is_mt_slot_data:
+                if logical_slot in hidden_slots:
+                    continue
+
+                if emitted_slot != logical_slot:
+                    self.ui.write(
+                        ecodes.EV_ABS,
+                        ecodes.ABS_MT_SLOT,
+                        logical_slot,
+                    )
+                    emitted_slot = logical_slot
+                    self.forward_slot = logical_slot
+
             self.ui.write_event(event)
 
     def _replay_buffer(self):
@@ -200,7 +251,9 @@ class TouchpadProxy:
     def _reset_candidate(self, clear_base=True):
         self.candidate = False
         self.candidate_started = 0.0
+        self.intent_committed = False
         self.buffered_packets = []
+        self.hidden_slots = set()
 
         if clear_base:
             self.base_centroid = None
@@ -243,9 +296,6 @@ class TouchpadProxy:
             if ay >= ACTION_MM and ay >= ax * DOMINANCE:
                 vertical = "up" if dy < 0 else "down"
                 self.action_emitted = True
-                # Corner chaining only ever follows a horizontal start;
-                # mark it done so a later vertical wiggle can't be
-                # mistaken for a corner_{side}_{vertical} action.
                 self.corner_emitted = True
                 self.action_time = now
 
@@ -271,13 +321,20 @@ class TouchpadProxy:
             self.log(f"suppressed corner action {action}")
 
     def _handle_packet(self, events):
-        previous_count = len(self._active_points())
+        previous_slots = self._active_slot_ids()
+        previous_count = len(previous_slots)
+
         self._apply_state(events)
-        count = len(self._active_points())
+
+        current_slots = self._active_slot_ids()
+        count = len(current_slots)
 
         if self.suppressed:
             if count < 2:
-                self._forward_packet(events)
+                self._forward_packet_excluding_slots(
+                    events,
+                    self.hidden_slots,
+                )
                 self._reset_suppression()
                 return
 
@@ -314,8 +371,32 @@ class TouchpadProxy:
             ay = abs(dy)
             pinch_delta = abs(distance - self.base_distance)
 
-            if (ax >= DIRECTION_MM and ax >= ay * DOMINANCE) or (
-                ay >= DIRECTION_MM and ay >= ax * DOMINANCE
+            directional_now = (
+                (ax >= DIRECTION_MM and ax >= ay * DOMINANCE) or
+                (ay >= DIRECTION_MM and ay >= ax * DOMINANCE)
+            )
+            directional_intent = self.intent_committed or directional_now
+            major_move = max(ax, ay)
+
+            pinch_is_genuine = (
+                pinch_delta >= PINCH_MM
+                and (
+                    not directional_intent
+                    or pinch_delta >= major_move * PINCH_TRANSLATION_RATIO
+                )
+            )
+
+            if pinch_is_genuine:
+                self._replay_buffer()
+                self._reset_candidate()
+                return
+
+            if directional_now:
+                self.intent_committed = True
+
+            if (
+                (ax >= ACTION_MM and ax >= ay * DOMINANCE) or
+                (ay >= ACTION_MM and ay >= ax * DOMINANCE)
             ):
                 self.buffered_packets = []
                 self.candidate = False
@@ -323,19 +404,7 @@ class TouchpadProxy:
                 self._maybe_emit_action(centroid)
                 return
 
-            if pinch_delta >= PINCH_MM:
-                self._replay_buffer()
-                self._reset_candidate()
-                return
-
-            if time.monotonic() - self.candidate_started >= DECISION_TIMEOUT:
-                self._replay_buffer()
-                self._reset_candidate()
-                return
-
             return
-
-        self._forward_packet(events)
 
         if (
             self.suppression.active
@@ -349,7 +418,11 @@ class TouchpadProxy:
                 self.candidate_started = time.monotonic()
                 self.base_centroid = centroid
                 self.base_distance = distance
-                self.buffered_packets = []
+                self.hidden_slots = current_slots - previous_slots
+                self.buffered_packets = [events]
+                return
+
+        self._forward_packet(events)
 
     def handle_event(self, event):
         self.packet.append(event)
