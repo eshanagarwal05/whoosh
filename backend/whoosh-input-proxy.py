@@ -129,6 +129,7 @@ class TouchpadProxy:
         self.forward_slot = 0
 
         self.suppressed = False
+        self.suppression_kind = None
         self.action_emitted = False
         self.action_side = None
         self.action_time = 0.0
@@ -261,6 +262,7 @@ class TouchpadProxy:
 
     def _reset_suppression(self):
         self.suppressed = False
+        self.suppression_kind = None
         self.action_emitted = False
         self.action_side = None
         self.action_time = 0.0
@@ -340,7 +342,10 @@ class TouchpadProxy:
 
             centroid, _distance = self._geometry()
 
-            if centroid is not None:
+            if (
+                centroid is not None
+                and self.suppression_kind != "pinch"
+            ):
                 self._maybe_emit_action(centroid)
 
             return
@@ -369,7 +374,8 @@ class TouchpadProxy:
             dy = centroid[1] - self.base_centroid[1]
             ax = abs(dx)
             ay = abs(dy)
-            pinch_delta = abs(distance - self.base_distance)
+            pinch_change = distance - self.base_distance
+            pinch_delta = abs(pinch_change)
 
             directional_now = (
                 (ax >= DIRECTION_MM and ax >= ay * DOMINANCE) or
@@ -387,8 +393,20 @@ class TouchpadProxy:
             )
 
             if pinch_is_genuine:
-                self._replay_buffer()
-                self._reset_candidate()
+                action = (
+                    "pinch_out"
+                    if pinch_change > 0
+                    else "pinch_in"
+                )
+
+                self.buffered_packets = []
+                self.candidate = False
+                self.suppressed = True
+                self.suppression_kind = "pinch"
+
+                self.send_action("gesture_claim_begin")
+                self.send_action("pinch_begin")
+                self.send_action(action)
                 return
 
             if directional_now:
@@ -401,6 +419,7 @@ class TouchpadProxy:
                 self.buffered_packets = []
                 self.candidate = False
                 self.suppressed = True
+                self.suppression_kind = "swipe"
                 self._maybe_emit_action(centroid)
                 return
 

@@ -27,10 +27,15 @@ AXIS_DOMINANCE = 1.25
 SCROLL_STREAM_GAP = 0.18
 CORNER_VERTICAL_THRESHOLD = 50.0
 CORNER_CHAIN_TIMEOUT = 0.30
-PINCH_IN_THRESHOLD = 0.78
-PINCH_OUT_THRESHOLD = 1.35
+PINCH_IN_THRESHOLD = 0.88
+PINCH_OUT_THRESHOLD = 1.18
 
 PROXY_ACTIONS = {
+    "gesture_claim_begin",
+    "gesture_claim_end",
+    "pinch_begin",
+    "pinch_in",
+    "pinch_out",
     "scroll_begin",
     "left",
     "right",
