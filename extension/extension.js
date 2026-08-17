@@ -792,23 +792,36 @@ export default class WhooshExtension extends Extension {
         const leftWidth = Math.floor(area.width / 2);
         const rightWidth = area.width - leftWidth;
 
-        if (side === 'left') {
-            this._moveResizeAnimated(
-                win,
-                area.x,
-                area.y,
-                leftWidth,
-                area.height
-            );
-        } else {
-            this._moveResizeAnimated(
-                win,
-                area.x + leftWidth,
-                area.y,
-                rightWidth,
-                area.height
-            );
+        let minWidth = 0;
+
+        try {
+            const [hasMinimum, windowMinWidth] = win.get_min_size();
+
+            if (hasMinimum)
+                minWidth = windowMinWidth;
+        } catch (_) {
         }
+
+        const halfWidth =
+            side === 'left' ? leftWidth : rightWidth;
+
+        const tileWidth = Math.min(
+            area.width,
+            Math.max(halfWidth, minWidth)
+        );
+
+        const tileX =
+            side === 'left'
+                ? area.x
+                : area.x + area.width - tileWidth;
+
+        this._moveResizeAnimated(
+            win,
+            tileX,
+            area.y,
+            tileWidth,
+            area.height
+        );
     }
 
     _tileCorner(win, side, vertical) {
