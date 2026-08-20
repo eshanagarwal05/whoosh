@@ -28,8 +28,10 @@ DIRECTION_MM = 1.5
 ACTION_MM = 4.5
 CORNER_MM = 5.5
 DOMINANCE = 1.10
-PINCH_MM = 1.2
-PINCH_TRANSLATION_RATIO = 1.50
+PINCH_IN_MM = 4.0
+PINCH_OUT_MM = 1.2
+PINCH_IN_TRANSLATION_RATIO = 3.50
+PINCH_OUT_TRANSLATION_RATIO = 1.50
 DECISION_TIMEOUT = 0.12
 CORNER_TIMEOUT = 0.30
 ARM_TTL = 0.25
@@ -383,9 +385,22 @@ class TouchpadProxy:
             )
             major_move = max(ax, ay)
 
+            pinch_threshold = (
+                PINCH_OUT_MM
+                if pinch_change > 0
+                else PINCH_IN_MM
+            )
+
+            pinch_translation_ratio = (
+                PINCH_OUT_TRANSLATION_RATIO
+                if pinch_change > 0
+                else PINCH_IN_TRANSLATION_RATIO
+            )
+
             pinch_is_genuine = (
-                pinch_delta >= PINCH_MM
-                and pinch_delta >= major_move * PINCH_TRANSLATION_RATIO
+                pinch_delta >= pinch_threshold
+                and pinch_delta >=
+                    major_move * pinch_translation_ratio
             )
 
             if pinch_is_genuine:

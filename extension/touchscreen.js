@@ -50,6 +50,11 @@ const MIN_REVERSAL_ALIGNMENT = -0.18;
 
 const STRAIGHT_RATIO = 0.42;
 
+const TOUCH_DRAG_START_DISTANCE = 8;
+const TAP_REPLAY_MAX_TRAVEL = 7;
+const TAP_REPLAY_MAX_MS = 700;
+const TAP_REPLAY_GUARD_US = 250_000;
+
 export class TouchscreenThrowController {
     constructor({
         getWindowAt,
@@ -63,6 +68,11 @@ export class TouchscreenThrowController {
         this._capturedEventId = 0;
         this._touchEventId = 0;
         this._inputGrab = null;
+
+        this._tapDevice = null;
+        this._tapReplaySource = 0;
+        this._tapReplayUntilUs = 0;
+
         this._applySources = new Set();
 
         this._releaseInputGrab();
@@ -110,6 +120,14 @@ export class TouchscreenThrowController {
 
         this._releaseInputGrab();
 
+        if (this._tapReplaySource) {
+            GLib.source_remove(this._tapReplaySource);
+            this._tapReplaySource = 0;
+        }
+
+        this._tapReplayUntilUs = 0;
+        this._tapDevice = null;
+
         if (this._grabBeginId) {
             global.display.disconnect(this._grabBeginId);
             this._grabBeginId = 0;
@@ -137,6 +155,19 @@ export class TouchscreenThrowController {
 
     _handleCapturedEvent(event) {
         const type = event.type();
+
+        /*
+         * A missed Whoosh gesture may be replayed through a virtual
+         * touchscreen. Let that synthetic sequence pass through to the
+         * application instead of immediately grabbing it again.
+         */
+        if (this._tapReplayUntilUs > GLib.get_monotonic_time() &&
+            (type === Clutter.EventType.TOUCH_BEGIN ||
+             type === Clutter.EventType.TOUCH_UPDATE ||
+             type === Clutter.EventType.TOUCH_END ||
+             type === Clutter.EventType.TOUCH_CANCEL)) {
+            return false;
+        }
 
         if (type === Clutter.EventType.KEY_PRESS ||
             type === Clutter.EventType.KEY_RELEASE) {
@@ -743,6 +774,7 @@ export class TouchscreenThrowController {
             }
         }
 
+
         if (cancelled) {
             session.pendingCommit = null;
         } else if (session.pendingCommit) {
@@ -780,6 +812,16 @@ export class TouchscreenThrowController {
         session.durationMs =
             (now - session.startedAtUs) / 1000;
 
+        if (!cancelled &&
+            !session.committedAction) {
+            this._maybeReplayTap(
+                session,
+                x,
+                y,
+                now
+            );
+        }
+
         if (this._state === STATE_CANDIDATE) {
             this._recordEvent(
                 session,
@@ -807,6 +849,117 @@ export class TouchscreenThrowController {
 
         // Whoosh owned this touchscreen sequence from TOUCH_BEGIN.
         return true;
+    }
+
+    _maybeReplayTap(session, endX, endY, _now) {
+        if (session.durationMs > TAP_REPLAY_MAX_MS)
+            return;
+
+        if (session.maximizedRestoreRequested ||
+            session.applyPending) {
+            return;
+        }
+
+        const origin =
+            session.samples?.[0] ?? null;
+
+        if (!origin)
+            return;
+
+        let maxTravel =
+            Math.hypot(
+                endX - origin.x,
+                endY - origin.y
+            );
+
+        for (const sample of session.samples ?? []) {
+            maxTravel =
+                Math.max(
+                    maxTravel,
+                    Math.hypot(
+                        sample.x - origin.x,
+                        sample.y - origin.y
+                    )
+                );
+        }
+
+        /*
+         * A drag that travels away and comes back must not become a tap.
+         * Use maximum excursion rather than only the final coordinates.
+         */
+        if (maxTravel > TAP_REPLAY_MAX_TRAVEL)
+            return;
+
+        this._replayTouchTap(
+            origin.x,
+            origin.y
+        );
+    }
+
+    _replayTouchTap(x, y) {
+        try {
+            if (!this._tapDevice) {
+                const seat =
+                    Clutter
+                        .get_default_backend()
+                        .get_default_seat();
+
+                this._tapDevice =
+                    seat.create_virtual_device(
+                        Clutter.InputDeviceType.TOUCHSCREEN_DEVICE
+                    );
+            }
+
+            /*
+             * Prevent the controller from grabbing the synthetic touch
+             * sequence that it is about to inject.
+             */
+            const downTimeUs =
+                GLib.get_monotonic_time();
+
+            this._tapReplayUntilUs =
+                downTimeUs +
+                TAP_REPLAY_GUARD_US;
+
+            this._tapDevice.notify_touch_down(
+                downTimeUs,
+                0,
+                x,
+                y
+            );
+
+            if (this._tapReplaySource) {
+                GLib.source_remove(
+                    this._tapReplaySource
+                );
+            }
+
+            /*
+             * Give the client a normal down/up touchscreen sequence instead
+             * of emitting both events at exactly the same instant.
+             */
+            this._tapReplaySource =
+                GLib.timeout_add(
+                    GLib.PRIORITY_DEFAULT,
+                    24,
+                    () => {
+                        this._tapReplaySource = 0;
+
+                        if (this._tapDevice) {
+                            this._tapDevice.notify_touch_up(
+                                GLib.get_monotonic_time(),
+                                0
+                            );
+                        }
+
+                        return GLib.SOURCE_REMOVE;
+                    }
+                );
+        } catch (error) {
+            console.error(
+                `Whoosh could not replay touchscreen tap: ${error}`
+            );
+        }
     }
 
     _releaseInputGrab() {
