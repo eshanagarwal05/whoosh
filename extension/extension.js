@@ -30,6 +30,7 @@ export default class WhooshExtension extends Extension {
     enable() {
         this._lastHorizontal = null;
         this._scrollTarget = null;
+        this._scrollOverviewTarget = null;
         this._pinchTarget = null;
         this._scrollAppTarget = null;
         this._pinchAppTarget = null;
@@ -120,6 +121,7 @@ export default class WhooshExtension extends Extension {
 
         this._lastHorizontal = null;
         this._scrollTarget = null;
+        this._scrollOverviewTarget = null;
         this._pinchTarget = null;
         this._scrollAppTarget = null;
         this._pinchAppTarget = null;
@@ -149,6 +151,16 @@ export default class WhooshExtension extends Extension {
 
         if (action === 'scroll_begin') {
             const [px, py] = global.get_pointer();
+            const overviewWin = this._getOverviewWindowUnderPointer(px, py);
+
+            this._scrollOverviewTarget = overviewWin;
+
+            if (overviewWin) {
+                this._scrollAppTarget = null;
+                this._scrollTarget = overviewWin;
+                return;
+            }
+
             const app = this._getDashAppUnderPointer(px, py);
 
             this._scrollAppTarget = app;
@@ -249,8 +261,9 @@ export default class WhooshExtension extends Extension {
 
         const [px, py] = global.get_pointer();
         const win = this._scrollTarget ?? this._getWindowUnderPointer(px, py);
+        const fromOverview = this._scrollOverviewTarget === win;
 
-        if (!win || win.is_hidden()) {
+        if (!win || (win.is_hidden() && !fromOverview)) {
             this._clearExpiredHorizontal(now);
             return;
         }
@@ -260,25 +273,36 @@ export default class WhooshExtension extends Extension {
             return;
         }
 
+        if (fromOverview && win.minimized && action !== 'down')
+            win.unminimize();
+
         switch (action) {
         case 'left':
             this._tileHalf(win, 'left');
             this._activate(win, time);
             this._lastHorizontal = {win, side: 'left', when: now};
+            if (fromOverview)
+                Main.overview.hide();
             break;
         case 'right':
             this._tileHalf(win, 'right');
             this._activate(win, time);
             this._lastHorizontal = {win, side: 'right', when: now};
+            if (fromOverview)
+                Main.overview.hide();
             break;
         case 'up':
             this._maximize(win);
             this._activate(win, time);
             this._lastHorizontal = null;
+            if (fromOverview)
+                Main.overview.hide();
             break;
         case 'down':
             this._minimize(win);
             this._lastHorizontal = null;
+            if (fromOverview)
+                Main.overview.hide();
             break;
         default:
             this._clearExpiredHorizontal(now);
@@ -327,6 +351,31 @@ export default class WhooshExtension extends Extension {
             now - this._lastHorizontal.when > CORNER_CHAIN_US) {
             this._lastHorizontal = null;
         }
+    }
+
+    _getOverviewWindowUnderPointer(px, py) {
+        if (!Main.overview.visible)
+            return null;
+
+        let actor = global.stage.get_actor_at_pos(
+            Clutter.PickMode.REACTIVE,
+            px,
+            py
+        );
+
+        while (actor) {
+            const win =
+                actor._delegate?.metaWindow ??
+                actor.metaWindow ??
+                null;
+
+            if (win && typeof win.get_frame_rect === 'function')
+                return win;
+
+            actor = actor.get_parent();
+        }
+
+        return null;
     }
 
     _getWindowUnderPointer(px, py) {
@@ -761,10 +810,11 @@ export default class WhooshExtension extends Extension {
 
     _updateSuppressionState() {
         const [px, py] = global.get_pointer();
+        const overviewWin = this._getOverviewWindowUnderPointer(px, py);
         const win = this._getWindowUnderPointer(px, py);
-
         const dashApp = this._getDashAppUnderPointer(px, py);
         const armed = Boolean(
+            overviewWin ||
             dashApp ||
             (
                 win &&
