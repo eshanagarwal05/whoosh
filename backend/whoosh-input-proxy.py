@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Eshan Agarwal
 
-"""Transparent touchpad proxy used by Whoosh for selective scroll suppression."""
+"""Transparent touchpad proxy used by Whoosh for selective gesture suppression."""
 
 import argparse
 import math
@@ -32,11 +32,19 @@ PINCH_IN_MM = 4.0
 PINCH_OUT_MM = 1.2
 PINCH_IN_TRANSLATION_RATIO = 3.50
 PINCH_OUT_TRANSLATION_RATIO = 1.50
+FIRST_CONTACT_GRACE = 0.08
+FIRST_CONTACT_MOVE_MM = 0.8
 DECISION_TIMEOUT = 0.12
 CORNER_TIMEOUT = 0.30
 ARM_TTL = 0.25
 VIRTUAL_SETTLE_SECONDS = 2.0
 BACKEND_SETTLE_SECONDS = 0.35
+
+PHYSICAL_BUTTONS = {
+    ecodes.BTN_LEFT,
+    ecodes.BTN_RIGHT,
+    ecodes.BTN_MIDDLE,
+}
 
 
 def discover_touchpad(libinput):
@@ -120,15 +128,19 @@ class TouchpadProxy:
         self.current_slot = 0
         self.slots = {}
         self.packet = []
+        self.forward_slot = 0
+
+        self.priming = False
+        self.prime_started = 0.0
+        self.prime_point = None
 
         self.candidate = False
         self.candidate_started = 0.0
-        self.intent_committed = False
         self.base_centroid = None
         self.base_distance = None
         self.buffered_packets = []
-        self.hidden_slots = set()
-        self.forward_slot = 0
+
+        self.passthrough_until_release = False
 
         self.suppressed = False
         self.suppression_kind = None
@@ -163,6 +175,10 @@ class TouchpadProxy:
             for slot_id, slot in self.slots.items()
             if slot.get("tracking_id", -1) >= 0
         }
+
+    def _single_point(self):
+        points = self._active_points()
+        return points[0] if len(points) == 1 else None
 
     def _geometry(self):
         points = self._active_points()
@@ -212,56 +228,30 @@ class TouchpadProxy:
 
             self.ui.write_event(event)
 
-    def _forward_packet_excluding_slots(self, events, hidden_slots):
-        logical_slot = self.forward_slot
-        emitted_slot = self.forward_slot
-
-        for event in events:
-            if (
-                event.type == ecodes.EV_ABS
-                and event.code == ecodes.ABS_MT_SLOT
-            ):
-                logical_slot = event.value
-                continue
-
-            is_mt_slot_data = (
-                event.type == ecodes.EV_ABS
-                and ecodes.ABS_MT_TOUCH_MAJOR
-                    <= event.code
-                    <= ecodes.ABS_MT_TOOL_Y
-            )
-
-            if is_mt_slot_data:
-                if logical_slot in hidden_slots:
-                    continue
-
-                if emitted_slot != logical_slot:
-                    self.ui.write(
-                        ecodes.EV_ABS,
-                        ecodes.ABS_MT_SLOT,
-                        logical_slot,
-                    )
-                    emitted_slot = logical_slot
-                    self.forward_slot = logical_slot
-
-            self.ui.write_event(event)
-
     def _replay_buffer(self):
         for events in self.buffered_packets:
             self._forward_packet(events)
 
         self.buffered_packets = []
 
-    def _reset_candidate(self, clear_base=True):
+    @staticmethod
+    def _has_physical_button_press(events):
+        return any(
+            event.type == ecodes.EV_KEY
+            and event.code in PHYSICAL_BUTTONS
+            and event.value == 1
+            for event in events
+        )
+
+    def _reset_detection(self):
+        self.priming = False
+        self.prime_started = 0.0
+        self.prime_point = None
         self.candidate = False
         self.candidate_started = 0.0
-        self.intent_committed = False
+        self.base_centroid = None
+        self.base_distance = None
         self.buffered_packets = []
-        self.hidden_slots = set()
-
-        if clear_base:
-            self.base_centroid = None
-            self.base_distance = None
 
     def _reset_suppression(self):
         self.suppressed = False
@@ -271,9 +261,7 @@ class TouchpadProxy:
         self.action_time = 0.0
         self.action_y = 0.0
         self.corner_emitted = False
-        self.base_centroid = None
-        self.base_distance = None
-        self._reset_candidate(clear_base=False)
+        self._reset_detection()
 
     def _begin_gesture_claim(self):
         if self.gesture_claimed:
@@ -282,12 +270,17 @@ class TouchpadProxy:
         self.gesture_claimed = True
         self.send_action("gesture_claim_begin")
 
-    def _end_gesture_claim_if_released(self, count):
-        if not self.gesture_claimed or count != 0:
+    def _end_gesture_claim(self):
+        if not self.gesture_claimed:
             return
 
         self.send_action("gesture_claim_end")
         self.gesture_claimed = False
+
+    def _fall_back_to_native(self, count):
+        self._replay_buffer()
+        self._reset_detection()
+        self.passthrough_until_release = count > 0
 
     def _maybe_emit_action(self, centroid):
         if self.base_centroid is None:
@@ -339,153 +332,174 @@ class TouchpadProxy:
             self.send_action(action)
             self.log(f"suppressed corner action {action}")
 
-    def _handle_packet(self, events):
-        previous_slots = self._active_slot_ids()
-        previous_count = len(previous_slots)
+    def _start_candidate(self):
+        centroid, distance = self._geometry()
 
-        self._apply_state(events)
+        if centroid is None or distance is None:
+            return False
 
-        current_slots = self._active_slot_ids()
-        count = len(current_slots)
+        self.priming = False
+        self.prime_started = 0.0
+        self.prime_point = None
+        self.candidate = True
+        self.candidate_started = time.monotonic()
+        self.base_centroid = centroid
+        self.base_distance = distance
+        return True
 
-        if self.suppressed:
-            if count < 2:
-                self._forward_packet_excluding_slots(
-                    events,
-                    self.hidden_slots,
-                )
-                self._reset_suppression()
-                self._end_gesture_claim_if_released(count)
-                return
+    def _handle_candidate(self, events, count):
+        self.buffered_packets.append(events)
 
-            centroid, _distance = self._geometry()
-
-            if (
-                centroid is not None
-                and self.suppression_kind != "pinch"
-            ):
-                self._maybe_emit_action(centroid)
-
+        if count != 2:
+            self._fall_back_to_native(count)
             return
 
-        if self.candidate:
-            self.buffered_packets.append(events)
+        if self._has_physical_button_press(events):
+            self._fall_back_to_native(count)
+            return
 
-            if count != 2:
-                if self.intent_committed:
-                    self._forward_packet_excluding_slots(
-                        events,
-                        self.hidden_slots,
-                    )
-                    self._reset_candidate()
-                else:
-                    self._replay_buffer()
-                    self._reset_candidate()
-                return
+        centroid, distance = self._geometry()
 
-            centroid, distance = self._geometry()
+        if centroid is None or distance is None:
+            self._fall_back_to_native(count)
+            return
 
-            if centroid is None or distance is None:
-                self._replay_buffer()
-                self._reset_candidate()
-                return
+        dx = centroid[0] - self.base_centroid[0]
+        dy = centroid[1] - self.base_centroid[1]
+        ax = abs(dx)
+        ay = abs(dy)
+        pinch_change = distance - self.base_distance
+        pinch_delta = abs(pinch_change)
+        major_move = max(ax, ay)
 
-            dx = centroid[0] - self.base_centroid[0]
-            dy = centroid[1] - self.base_centroid[1]
-            ax = abs(dx)
-            ay = abs(dy)
-            pinch_change = distance - self.base_distance
-            pinch_delta = abs(pinch_change)
+        pinch_threshold = (
+            PINCH_OUT_MM
+            if pinch_change > 0
+            else PINCH_IN_MM
+        )
+        pinch_translation_ratio = (
+            PINCH_OUT_TRANSLATION_RATIO
+            if pinch_change > 0
+            else PINCH_IN_TRANSLATION_RATIO
+        )
+        pinch_is_genuine = (
+            pinch_delta >= pinch_threshold
+            and pinch_delta >= major_move * pinch_translation_ratio
+        )
 
-            directional_now = (
-                (ax >= DIRECTION_MM and ax >= ay * DOMINANCE) or
-                (ay >= DIRECTION_MM and ay >= ax * DOMINANCE)
-            )
-            major_move = max(ax, ay)
+        if pinch_is_genuine:
+            action = "pinch_out" if pinch_change > 0 else "pinch_in"
+            self.buffered_packets = []
+            self.candidate = False
+            self.suppressed = True
+            self.suppression_kind = "pinch"
+            self._begin_gesture_claim()
+            self.send_action("pinch_begin")
+            self.send_action(action)
+            return
 
-            pinch_threshold = (
-                PINCH_OUT_MM
-                if pinch_change > 0
-                else PINCH_IN_MM
-            )
+        directional_action = (
+            (ax >= ACTION_MM and ax >= ay * DOMINANCE)
+            or (ay >= ACTION_MM and ay >= ax * DOMINANCE)
+        )
 
-            pinch_translation_ratio = (
-                PINCH_OUT_TRANSLATION_RATIO
-                if pinch_change > 0
-                else PINCH_IN_TRANSLATION_RATIO
-            )
-
-            pinch_is_genuine = (
-                pinch_delta >= pinch_threshold
-                and pinch_delta >=
-                    major_move * pinch_translation_ratio
-            )
-
-            if pinch_is_genuine:
-                action = (
-                    "pinch_out"
-                    if pinch_change > 0
-                    else "pinch_in"
-                )
-
-                self.buffered_packets = []
-                self.candidate = False
-                self.suppressed = True
-                self.suppression_kind = "pinch"
-
-                self._begin_gesture_claim()
-                self.send_action("pinch_begin")
-                self.send_action(action)
-                return
-
-            if directional_now:
-                self.intent_committed = True
-
-            if (
-                (ax >= ACTION_MM and ax >= ay * DOMINANCE) or
-                (ay >= ACTION_MM and ay >= ax * DOMINANCE)
-            ):
-                self.buffered_packets = []
-                self.candidate = False
-                self.suppressed = True
-                self.suppression_kind = "swipe"
-                self._begin_gesture_claim()
-                self._maybe_emit_action(centroid)
-                return
-
-            if not self.suppression.active and not self.intent_committed:
-                self._replay_buffer()
-                self._reset_candidate()
-                return
-
-            if (
-                time.monotonic() - self.candidate_started > DECISION_TIMEOUT
-                and not self.intent_committed
-            ):
-                self._replay_buffer()
-                self._reset_candidate()
-                return
-
+        if directional_action:
+            self.buffered_packets = []
+            self.candidate = False
+            self.suppressed = True
+            self.suppression_kind = "swipe"
+            self._begin_gesture_claim()
+            self._maybe_emit_action(centroid)
             return
 
         if (
-            self.suppression.active
-            and previous_count < 2
-            and count == 2
+            not self.suppression.active
+            or time.monotonic() - self.candidate_started > DECISION_TIMEOUT
         ):
-            centroid, distance = self._geometry()
+            self._fall_back_to_native(count)
 
-            if centroid is not None and distance is not None:
-                self.candidate = True
-                self.candidate_started = time.monotonic()
-                self.base_centroid = centroid
-                self.base_distance = distance
-                self.hidden_slots = current_slots - previous_slots
+    def _handle_priming(self, events, count):
+        self.buffered_packets.append(events)
+
+        if self._has_physical_button_press(events):
+            self._fall_back_to_native(count)
+            return
+
+        if count >= 2:
+            if count == 2 and self._start_candidate():
+                return
+
+            self._fall_back_to_native(count)
+            return
+
+        if count == 0:
+            self._fall_back_to_native(count)
+            return
+
+        point = self._single_point()
+        moved = False
+
+        if point is not None and self.prime_point is not None:
+            moved = math.hypot(
+                point[0] - self.prime_point[0],
+                point[1] - self.prime_point[1],
+            ) >= FIRST_CONTACT_MOVE_MM
+
+        if (
+            moved
+            or not self.suppression.active
+            or time.monotonic() - self.prime_started > FIRST_CONTACT_GRACE
+        ):
+            self._fall_back_to_native(count)
+
+    def _handle_packet(self, events):
+        previous_count = len(self._active_slot_ids())
+        self._apply_state(events)
+        count = len(self._active_slot_ids())
+
+        if self.suppressed:
+            # A claimed Whoosh gesture is completely private. Do not forward
+            # any part of its release sequence to the virtual touchpad; doing
+            # so lets libinput reinterpret the remaining contact as a tap.
+            if count == 0:
+                self._reset_suppression()
+                self._end_gesture_claim()
+            elif self.suppression_kind != "pinch":
+                centroid, _distance = self._geometry()
+                if centroid is not None:
+                    self._maybe_emit_action(centroid)
+            return
+
+        if self.passthrough_until_release:
+            self._forward_packet(events)
+            if count == 0:
+                self.passthrough_until_release = False
+            return
+
+        if self.candidate:
+            self._handle_candidate(events, count)
+            return
+
+        if self.priming:
+            self._handle_priming(events, count)
+            return
+
+        if self.suppression.active and previous_count == 0:
+            if count == 1:
+                self.priming = True
+                self.prime_started = time.monotonic()
+                self.prime_point = self._single_point()
                 self.buffered_packets = [events]
                 return
 
+            if count == 2:
+                self.buffered_packets = [events]
+                if self._start_candidate():
+                    return
+                self._fall_back_to_native(count)
+                return
+
         self._forward_packet(events)
-        self._end_gesture_claim_if_released(count)
 
     def handle_event(self, event):
         self.packet.append(event)
