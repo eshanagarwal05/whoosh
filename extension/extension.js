@@ -246,6 +246,18 @@ export default class WhooshExtension extends WhooshCoreExtension {
         return super._blockOverviewTouchpadScroll(event);
     }
 
+    _isInGestureZone(win, px, py) {
+        if (Main.overview.visible && !this._overviewEnabled())
+            return false;
+
+        if (!this._dashEnabled() &&
+            super._getDashAppUnderPointer(px, py)) {
+            return false;
+        }
+
+        return super._isInGestureZone(win, px, py);
+    }
+
     _applyTouchAction(win, action) {
         if (!this._cornerTilingEnabled() &&
             (action === 'top-left' ||
