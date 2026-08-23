@@ -1,10 +1,10 @@
 {
   "uuid": "whoosh@eshanagarwal05.github.io",
   "name": "Whoosh",
-  "description": "Touchpad window and GNOME dash gestures plus touchscreen title-bar dragging for GNOME Shell. Swipe title bars to tile, maximize, or minimize; pinch to close or fullscreen. In GNOME Overview, hover a window preview and use two-finger swipes to tile, maximize, minimize, or corner-tile that window; pinch in to close its application and pinch out to move that exact window to a new workspace. Touchscreen title-bar drags support release-to-tile gestures, corner tiling, and dragging windows out of maximized state. Over dash apps, swipe up to maximize the preferred window, swipe down to minimize all windows, pinch in to quit, and pinch out to open a new window on a new workspace.\n\nRequires the Whoosh backend from the project repository.",
+  "description": "Touchpad window and GNOME dash gestures plus touchscreen controls for GNOME Shell. Swipe title bars to tile, maximize, or minimize; pinch to close or fullscreen. On a touchscreen, pinch four fingers inward anywhere over a visible window to close it, or spread four fingers outward to fullscreen it. In GNOME Overview, hover a window preview and use two-finger swipes to tile, maximize, minimize, or corner-tile that window; pinch in to close its application and pinch out to move that exact window to a new workspace. Touchscreen title-bar drags support release-to-tile gestures, corner tiling, and dragging windows out of maximized state. Over dash apps, swipe up to maximize the preferred window, swipe down to minimize all windows, pinch in to quit, and pinch out to open a new window on a new workspace.\n\nRequires the Whoosh backend from the project repository.",
   "shell-version": [
     "50"
   ],
   "url": "https://github.com/eshanagarwal05/whoosh",
-  "version-name": "1.10.3"
+  "version-name": "1.11.0"
 }
