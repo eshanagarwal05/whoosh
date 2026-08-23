@@ -1,6 +1,6 @@
 # Whoosh
 
-Whoosh brings two-finger window and GNOME dash gestures to GNOME Shell 50.
+Whoosh brings two-finger touchpad gestures and touchscreen window controls to GNOME Shell 50.
 
 ## Gestures
 
@@ -16,6 +16,17 @@ Whoosh brings two-finger window and GNOME dash gestures to GNOME Shell 50.
 | Left → Down | Bottom-left quarter |
 | Right → Up | Top-right quarter |
 | Right → Down | Bottom-right quarter |
+
+### Touchscreen controls
+
+| Gesture over a visible window | Action |
+|---|---|
+| Four-finger pinch / swipe in | Close the window |
+| Four-finger spread / swipe out | Fullscreen the window |
+
+Four-finger touchscreen gestures can begin anywhere over the visible window, not just the title bar. Whoosh measures the spread of all four contacts, so moving four fingers together does not count as a pinch. The close or fullscreen action is applied only after all fingers are released.
+
+When a multi-touch touchscreen sequence begins, Whoosh temporarily pauses its one-finger title-bar drag controller. It restores that controller after the fingers are released, preventing the title-bar drag recognizer from competing with a four-finger gesture.
 
 ### GNOME dash and Dash to Dock
 
@@ -44,6 +55,11 @@ two-finger swipe gesture. The Whoosh backend reads only the detected touchpad,
 recognizes gestures, and emits action names over the system D-Bus. The GNOME
 Shell extension performs the actual window operations.
 
+Four-finger touchscreen pinches are handled separately inside the GNOME Shell
+extension from Clutter touch sequences. Their scale is calculated from the
+average distance of the four touch points from their centroid, which separates
+an inward/outward pinch from ordinary four-finger translation.
+
 Half and quarter tiling keep Mutter's `move_resize_frame()` call as the source
 of truth and add a compositor-only visual overlay inspired by GNOME Shell's
 native size-change animation. The overlay never freezes or owns window
@@ -63,6 +79,7 @@ Whoosh currently targets:
 - systemd
 - D-Bus
 - a touchpad exposed through libinput
+- a touchscreen for the optional four-finger touchscreen controls
 - Python 3 with PyGObject/Gio and `evdev`
 - the `libinput` command-line tools
 - GNU coreutils (`stdbuf`)
@@ -188,12 +205,15 @@ version, and the touchpad being visible to libinput.
 
 ## Troubleshooting and support
 
-If Whoosh does not respond to gestures, check the backend first:
+If Whoosh does not respond to touchpad gestures, check the backend first:
 
 ```bash
 systemctl status whoosh-backend.service
 journalctl -u whoosh-backend.service -b --no-pager
 ```
+
+Four-finger touchscreen gestures are recognized directly by the GNOME Shell
+extension, so they do not appear in the backend's libinput gesture logs.
 
 Then confirm that the extension is installed and enabled:
 
@@ -207,7 +227,7 @@ If you open a GitHub issue, please include:
 - GNOME Shell version (`gnome-shell --version`)
 - session type (`echo $XDG_SESSION_TYPE`)
 - Whoosh version or commit
-- touchpad model if known
+- touchpad or touchscreen model if known
 - output from `systemctl status whoosh-backend.service`
 - relevant lines from `journalctl -u whoosh-backend.service -b`
 - a description of the gesture you performed and what happened instead

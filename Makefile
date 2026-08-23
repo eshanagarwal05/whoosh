@@ -13,7 +13,7 @@ check:
 
 extension-zip: check
 	mkdir -p dist
-	cd extension && zip -9 -r ../dist/$(UUID).zip extension.js touchscreen.js metadata.json
+	cd extension && zip -9 -r ../dist/$(UUID).zip extension.js extension-core.js touchscreen.js fourfinger.js metadata.json
 
 clean:
 	rm -f dist/$(UUID).zip
