@@ -25,20 +25,42 @@ OBJECT_PATH = "/io/github/eshanagarwal05/Whoosh"
 INTERFACE_NAME = "io.github.eshanagarwal05.Whoosh"
 
 DIRECTION_MM = 1.5
-ACTION_MM = 4.5
-CORNER_MM = 5.5
 DOMINANCE = 1.10
-PINCH_IN_MM = 4.0
-PINCH_OUT_MM = 1.2
 PINCH_IN_TRANSLATION_RATIO = 3.50
 PINCH_OUT_TRANSLATION_RATIO = 1.50
 FIRST_CONTACT_GRACE = 0.08
 FIRST_CONTACT_MOVE_MM = 0.8
 DECISION_TIMEOUT = 0.12
-CORNER_TIMEOUT = 0.30
 ARM_TTL = 0.25
 VIRTUAL_SETTLE_SECONDS = 2.0
 BACKEND_SETTLE_SECONDS = 0.35
+
+SENSITIVITY_PRESETS = {
+    "low": {
+        "action_mm": 5.5,
+        "corner_mm": 6.5,
+        "pinch_in_mm": 5.0,
+        "pinch_out_mm": 1.5,
+    },
+    "normal": {
+        "action_mm": 4.5,
+        "corner_mm": 5.5,
+        "pinch_in_mm": 4.0,
+        "pinch_out_mm": 1.2,
+    },
+    "high": {
+        "action_mm": 3.5,
+        "corner_mm": 4.5,
+        "pinch_in_mm": 3.0,
+        "pinch_out_mm": 0.9,
+    },
+}
+
+CORNER_TIMING_PRESETS = {
+    "short": 0.20,
+    "normal": 0.30,
+    "long": 0.45,
+}
 
 PHYSICAL_BUTTONS = {
     ecodes.BTN_LEFT,
@@ -111,11 +133,96 @@ class SuppressionState:
         self._updated = time.monotonic()
 
 
+class ConfigurationState:
+    def __init__(self, bus, log):
+        self.sensitivity = "normal"
+        self.corner_timing = "normal"
+        self._log = log
+        self._forwarder = None
+        self._signal_id = bus.signal_subscribe(
+            None,
+            INTERFACE_NAME,
+            "Configuration",
+            OBJECT_PATH,
+            None,
+            Gio.DBusSignalFlags.NONE,
+            self._on_signal,
+        )
+
+    @property
+    def action_mm(self):
+        return SENSITIVITY_PRESETS[self.sensitivity]["action_mm"]
+
+    @property
+    def corner_mm(self):
+        return SENSITIVITY_PRESETS[self.sensitivity]["corner_mm"]
+
+    @property
+    def pinch_in_mm(self):
+        return SENSITIVITY_PRESETS[self.sensitivity]["pinch_in_mm"]
+
+    @property
+    def pinch_out_mm(self):
+        return SENSITIVITY_PRESETS[self.sensitivity]["pinch_out_mm"]
+
+    @property
+    def corner_timeout(self):
+        return CORNER_TIMING_PRESETS[self.corner_timing]
+
+    def set_forwarder(self, forwarder):
+        self._forwarder = forwarder
+        self._forward()
+
+    def _forward(self):
+        if self._forwarder is not None:
+            self._forwarder(self.sensitivity, self.corner_timing)
+
+    def _on_signal(
+        self,
+        _connection,
+        _sender,
+        _object_path,
+        _interface_name,
+        _signal_name,
+        parameters,
+    ):
+        sensitivity, corner_timing = parameters.unpack()
+
+        if sensitivity not in SENSITIVITY_PRESETS:
+            return
+        if corner_timing not in CORNER_TIMING_PRESETS:
+            return
+
+        changed = (
+            sensitivity != self.sensitivity
+            or corner_timing != self.corner_timing
+        )
+        if not changed:
+            return
+
+        self.sensitivity = sensitivity
+        self.corner_timing = corner_timing
+        self._log(
+            f"configuration sensitivity={sensitivity} "
+            f"corner_timing={corner_timing}"
+        )
+        self._forward()
+
+
 class TouchpadProxy:
-    def __init__(self, dev, ui, suppression, send_action, log):
+    def __init__(
+        self,
+        dev,
+        ui,
+        suppression,
+        configuration,
+        send_action,
+        log,
+    ):
         self.dev = dev
         self.ui = ui
         self.suppression = suppression
+        self.configuration = configuration
         self.send_action = send_action
         self.log = log
 
@@ -291,9 +398,10 @@ class TouchpadProxy:
         dy = centroid[1] - self.base_centroid[1]
         ax = abs(dx)
         ay = abs(dy)
+        action_mm = self.configuration.action_mm
 
         if not self.action_emitted:
-            if ax >= ACTION_MM and ax >= ay * DOMINANCE:
+            if ax >= action_mm and ax >= ay * DOMINANCE:
                 side = "left" if dx < 0 else "right"
                 self.action_emitted = True
                 self.action_side = side
@@ -305,7 +413,7 @@ class TouchpadProxy:
                 self.log(f"suppressed horizontal action {side}")
                 return
 
-            if ay >= ACTION_MM and ay >= ax * DOMINANCE:
+            if ay >= action_mm and ay >= ax * DOMINANCE:
                 vertical = "up" if dy < 0 else "down"
                 self.action_emitted = True
                 self.corner_emitted = True
@@ -320,12 +428,12 @@ class TouchpadProxy:
         if self.corner_emitted:
             return
 
-        if now - self.action_time > CORNER_TIMEOUT:
+        if now - self.action_time > self.configuration.corner_timeout:
             return
 
         corner_dy = centroid[1] - self.action_y
 
-        if abs(corner_dy) >= CORNER_MM:
+        if abs(corner_dy) >= self.configuration.corner_mm:
             vertical = "up" if corner_dy < 0 else "down"
             self.corner_emitted = True
             action = f"corner_{self.action_side}_{vertical}"
@@ -373,9 +481,9 @@ class TouchpadProxy:
         major_move = max(ax, ay)
 
         pinch_threshold = (
-            PINCH_OUT_MM
+            self.configuration.pinch_out_mm
             if pinch_change > 0
-            else PINCH_IN_MM
+            else self.configuration.pinch_in_mm
         )
         pinch_translation_ratio = (
             PINCH_OUT_TRANSLATION_RATIO
@@ -398,9 +506,10 @@ class TouchpadProxy:
             self.send_action(action)
             return
 
+        action_mm = self.configuration.action_mm
         directional_action = (
-            (ax >= ACTION_MM and ax >= ay * DOMINANCE)
-            or (ay >= ACTION_MM and ay >= ax * DOMINANCE)
+            (ax >= action_mm and ax >= ay * DOMINANCE)
+            or (ay >= action_mm and ay >= ax * DOMINANCE)
         )
 
         if directional_action:
@@ -458,9 +567,6 @@ class TouchpadProxy:
         count = len(self._active_slot_ids())
 
         if self.suppressed:
-            # A claimed Whoosh gesture is completely private. Do not forward
-            # any part of its release sequence to the virtual touchpad; doing
-            # so lets libinput reinterpret the remaining contact as a tap.
             if count == 0:
                 self._reset_suppression()
                 self._end_gesture_claim()
@@ -557,6 +663,7 @@ def main():
 
     bus = Gio.bus_get_sync(Gio.BusType.SYSTEM, None)
     suppression = SuppressionState(bus, log)
+    configuration = ConfigurationState(bus, log)
 
     dev = InputDevice(device_path)
     ui = None
@@ -614,6 +721,11 @@ def main():
             backend.stdin.write(action + "\n")
             backend.stdin.flush()
 
+        def send_configuration(sensitivity, corner_timing):
+            send_action(f"config {sensitivity} {corner_timing}")
+
+        configuration.set_forwarder(send_configuration)
+
         dev.grab()
         grabbed = True
 
@@ -621,6 +733,7 @@ def main():
             dev,
             ui,
             suppression,
+            configuration,
             send_action,
             log,
         )
