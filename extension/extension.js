@@ -32,6 +32,7 @@ export default class WhooshExtension extends Extension {
         this._scrollTarget = null;
         this._scrollOverviewTarget = null;
         this._pinchTarget = null;
+        this._pinchOverviewTarget = null;
         this._scrollAppTarget = null;
         this._pinchAppTarget = null;
         this._gestureClaimActive = false;
@@ -133,6 +134,7 @@ export default class WhooshExtension extends Extension {
         this._scrollTarget = null;
         this._scrollOverviewTarget = null;
         this._pinchTarget = null;
+        this._pinchOverviewTarget = null;
         this._scrollAppTarget = null;
         this._pinchAppTarget = null;
         this._lastFocusedApp = null;
@@ -188,6 +190,18 @@ export default class WhooshExtension extends Extension {
 
         if (action === 'pinch_begin') {
             const [px, py] = global.get_pointer();
+
+            const overviewWin =
+                this._getOverviewWindowUnderPointer(px, py);
+
+            this._pinchOverviewTarget = overviewWin;
+
+            if (overviewWin) {
+                this._pinchAppTarget = null;
+                this._pinchTarget = null;
+                return;
+            }
+
             const app = this._getDashAppUnderPointer(px, py);
 
             this._pinchAppTarget = app;
@@ -204,9 +218,31 @@ export default class WhooshExtension extends Extension {
         }
 
         if (action === 'pinch_in' || action === 'pinch_out') {
+            const overviewWin = this._pinchOverviewTarget;
+            this._pinchOverviewTarget = null;
+
             const app = this._pinchAppTarget;
             this._pinchAppTarget = null;
             this._lastHorizontal = null;
+
+            if (overviewWin) {
+                if (action === 'pinch_in') {
+                    const overviewApp =
+                        this._windowTracker?.get_window_app(overviewWin);
+
+                    if (overviewApp)
+                        this._quitDashApp(overviewApp);
+                    else
+                        this._close(overviewWin, time);
+                } else {
+                    this._moveOverviewWindowToNewWorkspace(
+                        overviewWin,
+                        time
+                    );
+                }
+
+                return;
+            }
 
             if (app) {
                 if (action === 'pinch_in')
@@ -854,6 +890,26 @@ export default class WhooshExtension extends Extension {
                 `Whoosh: failed to open ${app.get_name()} on the new workspace`
             );
         }
+    }
+
+    _moveOverviewWindowToNewWorkspace(win, time) {
+        if (!win || win.is_hidden())
+            return;
+
+        const workspace =
+            global.workspace_manager.append_new_workspace(
+                false,
+                time
+            );
+
+        if (win.minimized)
+            win.unminimize();
+
+        win.change_workspace(workspace);
+        workspace.activate(time);
+
+        Main.overview.hide();
+        this._activate(win, time);
     }
 
     _isChromeWindow(win) {
