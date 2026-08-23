@@ -1,4 +1,5 @@
 UUID := whoosh@eshanagarwal05.github.io
+SCHEMA_DIR := extension/schemas
 
 .PHONY: all check extension-zip clean
 
@@ -10,11 +11,14 @@ check:
 	bash -n backend/install.sh
 	bash -n backend/uninstall.sh
 	python3 -m json.tool extension/metadata.json >/dev/null
+	glib-compile-schemas --strict --dry-run $(SCHEMA_DIR)
 
 extension-zip: check
 	mkdir -p dist
-	cd extension && zip -9 -r ../dist/$(UUID).zip extension.js extension-core.js touchscreen.js fourfinger.js metadata.json
+	glib-compile-schemas --strict $(SCHEMA_DIR)
+	cd extension && zip -9 -r ../dist/$(UUID).zip extension.js extension-core.js touchscreen.js fourfinger.js prefs.js metadata.json schemas
 
 clean:
 	rm -f dist/$(UUID).zip
+	rm -f $(SCHEMA_DIR)/gschemas.compiled
 	rm -rf backend/__pycache__
