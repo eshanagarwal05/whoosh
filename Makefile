@@ -6,6 +6,7 @@ all: extension-zip
 
 check:
 	python3 -m py_compile backend/whoosh-backend.py
+	python3 -m py_compile backend/whoosh-input-proxy.py
 	bash -n backend/install.sh
 	bash -n backend/uninstall.sh
 	python3 -m json.tool extension/metadata.json >/dev/null
