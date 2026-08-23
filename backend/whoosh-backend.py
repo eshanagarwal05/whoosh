@@ -22,14 +22,36 @@ BUS_NAME = "io.github.eshanagarwal05.Whoosh"
 OBJECT_PATH = "/io/github/eshanagarwal05/Whoosh"
 INTERFACE_NAME = "io.github.eshanagarwal05.Whoosh"
 
-SCROLL_THRESHOLD = 65.0
 AXIS_DOMINANCE = 1.25
 SCROLL_STREAM_GAP = 0.18
-CORNER_VERTICAL_THRESHOLD = 50.0
-CORNER_CHAIN_TIMEOUT = 0.30
-PINCH_IN_THRESHOLD = 0.70
-PINCH_OUT_THRESHOLD = 1.28
 RELEASE_ACTION_SETTLE_SECONDS = 0.05
+
+SENSITIVITY_PRESETS = {
+    "low": {
+        "scroll_threshold": 80.0,
+        "corner_vertical_threshold": 65.0,
+        "pinch_in_threshold": 0.62,
+        "pinch_out_threshold": 1.38,
+    },
+    "normal": {
+        "scroll_threshold": 65.0,
+        "corner_vertical_threshold": 50.0,
+        "pinch_in_threshold": 0.70,
+        "pinch_out_threshold": 1.28,
+    },
+    "high": {
+        "scroll_threshold": 50.0,
+        "corner_vertical_threshold": 38.0,
+        "pinch_in_threshold": 0.78,
+        "pinch_out_threshold": 1.20,
+    },
+}
+
+CORNER_TIMING_PRESETS = {
+    "short": 0.20,
+    "normal": 0.30,
+    "long": 0.45,
+}
 
 PROXY_ACTIONS = {
     "gesture_claim_begin",
@@ -133,10 +155,39 @@ class GestureRecognizer:
         self.corner_triggered = False
         self.pinch_active = False
         self.pinch_scale = 1.0
+        self.sensitivity = "normal"
+        self.corner_timing = "normal"
+        self.apply_configuration("normal", "normal", log=False)
 
     def log(self, message):
         if self.verbose:
             print(f"[whoosh] {message}", flush=True)
+
+    def apply_configuration(self, sensitivity, corner_timing, log=True):
+        if sensitivity not in SENSITIVITY_PRESETS:
+            return False
+        if corner_timing not in CORNER_TIMING_PRESETS:
+            return False
+
+        preset = SENSITIVITY_PRESETS[sensitivity]
+        self.sensitivity = sensitivity
+        self.corner_timing = corner_timing
+        self.scroll_threshold = preset["scroll_threshold"]
+        self.corner_vertical_threshold = preset["corner_vertical_threshold"]
+        self.pinch_in_threshold = preset["pinch_in_threshold"]
+        self.pinch_out_threshold = preset["pinch_out_threshold"]
+        self.corner_chain_timeout = CORNER_TIMING_PRESETS[corner_timing]
+        self.reset_scroll()
+        self.pinch_active = False
+        self.pinch_scale = 1.0
+
+        if log:
+            self.log(
+                f"configuration sensitivity={sensitivity} "
+                f"corner_timing={corner_timing}"
+            )
+
+        return True
 
     def reset_scroll(self, now=None):
         self.scroll_x = 0.0
@@ -177,13 +228,13 @@ class GestureRecognizer:
             self.emit("scroll_begin")
 
         if self.corner_arm and not self.corner_triggered:
-            if now - self.corner_armed_at > CORNER_CHAIN_TIMEOUT:
+            if now - self.corner_armed_at > self.corner_chain_timeout:
                 self.corner_arm = None
                 self.corner_armed_at = 0.0
                 self.corner_y = 0.0
             else:
                 self.corner_y += dy
-                if abs(self.corner_y) >= CORNER_VERTICAL_THRESHOLD:
+                if abs(self.corner_y) >= self.corner_vertical_threshold:
                     vertical = "up" if self.corner_y < 0 else "down"
                     self.corner_triggered = True
                     self.emit(f"corner_{self.corner_arm}_{vertical}")
@@ -197,7 +248,7 @@ class GestureRecognizer:
         ax = abs(self.scroll_x)
         ay = abs(self.scroll_y)
 
-        if ax >= SCROLL_THRESHOLD and ax >= ay * AXIS_DOMINANCE:
+        if ax >= self.scroll_threshold and ax >= ay * AXIS_DOMINANCE:
             side = "left" if self.scroll_x < 0 else "right"
             self.scroll_triggered = True
             self.corner_arm = side
@@ -206,7 +257,7 @@ class GestureRecognizer:
             self.emit(side)
             return
 
-        if ay >= SCROLL_THRESHOLD and ay >= ax * AXIS_DOMINANCE:
+        if ay >= self.scroll_threshold and ay >= ax * AXIS_DOMINANCE:
             self.scroll_triggered = True
             self.emit("up" if self.scroll_y < 0 else "down")
 
@@ -240,9 +291,9 @@ class GestureRecognizer:
             if fingers != 2:
                 return
 
-            if scale <= PINCH_IN_THRESHOLD:
+            if scale <= self.pinch_in_threshold:
                 self.emit("pinch_in")
-            elif scale >= PINCH_OUT_THRESHOLD:
+            elif scale >= self.pinch_out_threshold:
                 self.emit("pinch_out")
 
 
@@ -251,7 +302,15 @@ def _proxy_action_reader(recognizer):
     pending_release_actions = []
 
     for line in sys.stdin:
-        action = line.strip()
+        raw = line.strip()
+
+        if raw.startswith("config "):
+            parts = raw.split()
+            if len(parts) == 3:
+                recognizer.apply_configuration(parts[1], parts[2])
+            continue
+
+        action = raw
         if action not in PROXY_ACTIONS:
             continue
 
