@@ -13,6 +13,7 @@ import {FourFingerTouchController} from './fourfinger.js';
 const OBJECT_PATH = '/io/github/eshanagarwal05/Whoosh';
 const INTERFACE_NAME = 'io.github.eshanagarwal05.Whoosh';
 const CONFIG_HEARTBEAT_US = 1_000_000;
+const CORE_CORNER_CHAIN_US = 300_000;
 const TILE_SETTLE_MS = 16;
 const TILE_SETTLE_ATTEMPTS = 4;
 
@@ -77,10 +78,10 @@ export default class WhooshExtension extends WhooshCoreExtension {
             'touchpad-sensitivity',
             () => this._sendBackendConfiguration(true)
         );
-        connect(
-            'corner-timing',
-            () => this._sendBackendConfiguration(true)
-        );
+        connect('corner-timing', () => {
+            this._lastHorizontal = null;
+            this._sendBackendConfiguration(true);
+        });
     }
 
     _disconnectSettings() {
@@ -121,6 +122,17 @@ export default class WhooshExtension extends WhooshCoreExtension {
 
     _animationsEnabled() {
         return this._settings?.get_boolean('animations-enabled') ?? true;
+    }
+
+    _cornerChainUs() {
+        switch (this._settings?.get_string('corner-timing')) {
+        case 'short':
+            return 200_000;
+        case 'long':
+            return 450_000;
+        default:
+            return CORE_CORNER_CHAIN_US;
+        }
     }
 
     _animationDuration() {
@@ -216,6 +228,33 @@ export default class WhooshExtension extends WhooshCoreExtension {
 
         if (!this._cornerTilingEnabled() && action.startsWith('corner_'))
             return;
+
+        if (this._cornerTilingEnabled() &&
+            (action === 'up' || action === 'down') &&
+            this._lastHorizontal) {
+            const now = GLib.get_monotonic_time();
+            const elapsed = now - this._lastHorizontal.when;
+            const limit = this._cornerChainUs();
+
+            if (elapsed > limit) {
+                this._lastHorizontal = null;
+            } else if (limit > CORE_CORNER_CHAIN_US &&
+                elapsed > CORE_CORNER_CHAIN_US &&
+                !this._scrollAppTarget) {
+                const {win, side} = this._lastHorizontal;
+
+                if (win && !win.is_hidden()) {
+                    const vertical = action === 'up' ? 'top' : 'bottom';
+                    this._tileCorner(win, side, vertical);
+                    this._activate(
+                        win,
+                        global.display.get_current_time()
+                    );
+                    this._lastHorizontal = null;
+                    return;
+                }
+            }
+        }
 
         super._handleAction(action);
 
