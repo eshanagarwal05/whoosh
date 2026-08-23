@@ -30,7 +30,9 @@ export default class WhooshExtension extends Extension {
     enable() {
         this._lastHorizontal = null;
         this._scrollTarget = null;
+        this._scrollOverviewTarget = null;
         this._pinchTarget = null;
+        this._pinchOverviewTarget = null;
         this._scrollAppTarget = null;
         this._pinchAppTarget = null;
         this._gestureClaimActive = false;
@@ -56,6 +58,11 @@ export default class WhooshExtension extends Extension {
             () => this._updateSuppressionState()
         );
         this._updateSuppressionState();
+
+        this._overviewScrollBlockId = global.stage.connect(
+            'captured-event',
+            (_actor, event) => this._blockOverviewTouchpadScroll(event)
+        );
 
         this._touchscreen = new TouchscreenThrowController({
             getWindowAt: (x, y) =>
@@ -86,6 +93,11 @@ export default class WhooshExtension extends Extension {
     disable() {
         this._touchscreen?.disable();
         this._touchscreen = null;
+
+        if (this._overviewScrollBlockId) {
+            global.stage.disconnect(this._overviewScrollBlockId);
+            this._overviewScrollBlockId = 0;
+        }
 
         this._cancelPendingClose();
         this._gestureClaimActive = false;
@@ -120,7 +132,9 @@ export default class WhooshExtension extends Extension {
 
         this._lastHorizontal = null;
         this._scrollTarget = null;
+        this._scrollOverviewTarget = null;
         this._pinchTarget = null;
+        this._pinchOverviewTarget = null;
         this._scrollAppTarget = null;
         this._pinchAppTarget = null;
         this._lastFocusedApp = null;
@@ -149,6 +163,16 @@ export default class WhooshExtension extends Extension {
 
         if (action === 'scroll_begin') {
             const [px, py] = global.get_pointer();
+            const overviewWin = this._getOverviewWindowUnderPointer(px, py);
+
+            this._scrollOverviewTarget = overviewWin;
+
+            if (overviewWin) {
+                this._scrollAppTarget = null;
+                this._scrollTarget = overviewWin;
+                return;
+            }
+
             const app = this._getDashAppUnderPointer(px, py);
 
             this._scrollAppTarget = app;
@@ -166,6 +190,18 @@ export default class WhooshExtension extends Extension {
 
         if (action === 'pinch_begin') {
             const [px, py] = global.get_pointer();
+
+            const overviewWin =
+                this._getOverviewWindowUnderPointer(px, py);
+
+            this._pinchOverviewTarget = overviewWin;
+
+            if (overviewWin) {
+                this._pinchAppTarget = null;
+                this._pinchTarget = null;
+                return;
+            }
+
             const app = this._getDashAppUnderPointer(px, py);
 
             this._pinchAppTarget = app;
@@ -182,9 +218,31 @@ export default class WhooshExtension extends Extension {
         }
 
         if (action === 'pinch_in' || action === 'pinch_out') {
+            const overviewWin = this._pinchOverviewTarget;
+            this._pinchOverviewTarget = null;
+
             const app = this._pinchAppTarget;
             this._pinchAppTarget = null;
             this._lastHorizontal = null;
+
+            if (overviewWin) {
+                if (action === 'pinch_in') {
+                    const overviewApp =
+                        this._windowTracker?.get_window_app(overviewWin);
+
+                    if (overviewApp)
+                        this._quitDashApp(overviewApp);
+                    else
+                        this._close(overviewWin, time);
+                } else {
+                    this._moveOverviewWindowToNewWorkspace(
+                        overviewWin,
+                        time
+                    );
+                }
+
+                return;
+            }
 
             if (app) {
                 if (action === 'pinch_in')
@@ -249,8 +307,9 @@ export default class WhooshExtension extends Extension {
 
         const [px, py] = global.get_pointer();
         const win = this._scrollTarget ?? this._getWindowUnderPointer(px, py);
+        const fromOverview = this._scrollOverviewTarget === win;
 
-        if (!win || win.is_hidden()) {
+        if (!win || (win.is_hidden() && !fromOverview)) {
             this._clearExpiredHorizontal(now);
             return;
         }
@@ -260,25 +319,36 @@ export default class WhooshExtension extends Extension {
             return;
         }
 
+        if (fromOverview && win.minimized && action !== 'down')
+            win.unminimize();
+
         switch (action) {
         case 'left':
             this._tileHalf(win, 'left');
             this._activate(win, time);
             this._lastHorizontal = {win, side: 'left', when: now};
+            if (fromOverview)
+                Main.overview.hide();
             break;
         case 'right':
             this._tileHalf(win, 'right');
             this._activate(win, time);
             this._lastHorizontal = {win, side: 'right', when: now};
+            if (fromOverview)
+                Main.overview.hide();
             break;
         case 'up':
             this._maximize(win);
             this._activate(win, time);
             this._lastHorizontal = null;
+            if (fromOverview)
+                Main.overview.hide();
             break;
         case 'down':
             this._minimize(win);
             this._lastHorizontal = null;
+            if (fromOverview)
+                Main.overview.hide();
             break;
         default:
             this._clearExpiredHorizontal(now);
@@ -327,6 +397,98 @@ export default class WhooshExtension extends Extension {
             now - this._lastHorizontal.when > CORNER_CHAIN_US) {
             this._lastHorizontal = null;
         }
+    }
+
+    _blockOverviewTouchpadScroll(event) {
+        if (!Main.overview.visible ||
+            event.type() !== Clutter.EventType.SCROLL) {
+            return Clutter.EVENT_PROPAGATE;
+        }
+
+        if (event.get_scroll_direction() !== Clutter.ScrollDirection.SMOOTH)
+            return Clutter.EVENT_PROPAGATE;
+
+        const source = event.get_scroll_source();
+        const device = event.get_source_device();
+
+        const isTouchpad =
+            source === Clutter.ScrollSource.FINGER ||
+            device?.get_device_type() ===
+                Clutter.InputDeviceType.TOUCHPAD_DEVICE;
+
+        return isTouchpad
+            ? Clutter.EVENT_STOP
+            : Clutter.EVENT_PROPAGATE;
+    }
+
+    _getOverviewWindowUnderPointer(px, py) {
+        if (!Main.overview.visible)
+            return null;
+
+        let actor = global.stage.get_actor_at_pos(
+            Clutter.PickMode.ALL,
+            px,
+            py
+        );
+
+        while (actor) {
+            const win =
+                actor._delegate?.metaWindow ??
+                actor.metaWindow ??
+                null;
+
+            if (win && typeof win.get_frame_rect === 'function')
+                return win;
+
+            actor = actor.get_parent();
+        }
+
+        /*
+         * Pick results in Overview are not always descendants of the
+         * WindowPreview actor. Fall back to walking the Overview tree
+         * and compare the pointer against each preview's stage geometry.
+         */
+        const stack = [
+            Main.layoutManager.overviewGroup,
+        ];
+
+        while (stack.length > 0) {
+            const current = stack.pop();
+
+            if (!current)
+                continue;
+
+            const win =
+                current.metaWindow ??
+                current._delegate?.metaWindow ??
+                null;
+
+            if (win && typeof win.get_frame_rect === 'function') {
+                try {
+                    const [x, y] =
+                        current.get_transformed_position();
+                    const [width, height] =
+                        current.get_transformed_size();
+
+                    if (width > 0 &&
+                        height > 0 &&
+                        px >= x &&
+                        px < x + width &&
+                        py >= y &&
+                        py < y + height) {
+                        return win;
+                    }
+                } catch (_) {
+                }
+            }
+
+            const children = current.get_children?.() ?? [];
+
+            for (const child of children)
+                stack.push(child);
+        }
+
+        return null;
     }
 
     _getWindowUnderPointer(px, py) {
@@ -730,6 +892,26 @@ export default class WhooshExtension extends Extension {
         }
     }
 
+    _moveOverviewWindowToNewWorkspace(win, time) {
+        if (!win || win.is_hidden())
+            return;
+
+        const workspace =
+            global.workspace_manager.append_new_workspace(
+                false,
+                time
+            );
+
+        if (win.minimized)
+            win.unminimize();
+
+        win.change_workspace(workspace);
+        workspace.activate(time);
+
+        Main.overview.hide();
+        this._activate(win, time);
+    }
+
     _isChromeWindow(win) {
         const sandboxedAppId =
             win.get_sandboxed_app_id()?.toLowerCase() ?? '';
@@ -761,10 +943,11 @@ export default class WhooshExtension extends Extension {
 
     _updateSuppressionState() {
         const [px, py] = global.get_pointer();
+        const overviewWin = this._getOverviewWindowUnderPointer(px, py);
         const win = this._getWindowUnderPointer(px, py);
-
         const dashApp = this._getDashAppUnderPointer(px, py);
         const armed = Boolean(
+            overviewWin ||
             dashApp ||
             (
                 win &&
