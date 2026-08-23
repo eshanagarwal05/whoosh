@@ -20,6 +20,7 @@ const TILE_STATE_GUARD_MS = 600;
 const TILE_STATE_GUARD_INTERVAL_MS = 16;
 const SUPPRESSION_POLL_MS = 30;
 const SUPPRESSION_HEARTBEAT_US = 100_000;
+const CLOSE_RELEASE_SETTLE_MS = 50;
 
 const BUS_NAME = 'io.github.eshanagarwal05.Whoosh';
 const OBJECT_PATH = '/io/github/eshanagarwal05/Whoosh';
@@ -32,6 +33,9 @@ export default class WhooshExtension extends Extension {
         this._pinchTarget = null;
         this._scrollAppTarget = null;
         this._pinchAppTarget = null;
+        this._gestureClaimActive = false;
+        this._pendingClose = null;
+        this._pendingCloseTimeoutId = 0;
 
         this._tileAnimations = new Map();
         this._resizeGuards = new Map();
@@ -83,6 +87,8 @@ export default class WhooshExtension extends Extension {
         this._touchscreen?.disable();
         this._touchscreen = null;
 
+        this._cancelPendingClose();
+        this._gestureClaimActive = false;
 
         if (this._suppressionPollId) {
             GLib.source_remove(this._suppressionPollId);
@@ -128,6 +134,18 @@ export default class WhooshExtension extends Extension {
     _handleAction(action) {
         const now = GLib.get_monotonic_time();
         const time = global.display.get_current_time();
+
+        if (action === 'gesture_claim_begin') {
+            this._cancelPendingClose();
+            this._gestureClaimActive = true;
+            return;
+        }
+
+        if (action === 'gesture_claim_end') {
+            this._gestureClaimActive = false;
+            this._commitPendingClose();
+            return;
+        }
 
         if (action === 'scroll_begin') {
             const [px, py] = global.get_pointer();
@@ -184,7 +202,10 @@ export default class WhooshExtension extends Extension {
                 return;
 
             if (action === 'pinch_in') {
-                this._close(win, time);
+                if (this._gestureClaimActive)
+                    this._queueClose(win);
+                else
+                    this._close(win, time);
             } else {
                 this._fullscreen(win);
                 this._activate(win, time);
@@ -1121,6 +1142,46 @@ export default class WhooshExtension extends Extension {
 
         if (win.can_minimize())
             win.minimize();
+    }
+
+    _cancelPendingClose() {
+        if (this._pendingCloseTimeoutId) {
+            GLib.source_remove(this._pendingCloseTimeoutId);
+            this._pendingCloseTimeoutId = 0;
+        }
+
+        this._pendingClose = null;
+    }
+
+    _queueClose(win) {
+        this._pendingClose = win;
+    }
+
+    _commitPendingClose() {
+        const win = this._pendingClose;
+        this._pendingClose = null;
+
+        if (!win)
+            return;
+
+        this._pendingCloseTimeoutId = GLib.timeout_add_once(
+            GLib.PRIORITY_DEFAULT,
+            CLOSE_RELEASE_SETTLE_MS,
+            () => {
+                this._pendingCloseTimeoutId = 0;
+
+                try {
+                    if (!win.is_hidden()) {
+                        this._close(
+                            win,
+                            global.display.get_current_time()
+                        );
+                    }
+                } catch (error) {
+                    console.error(`Whoosh delayed close failed: ${error}`);
+                }
+            }
+        );
     }
 
     _close(win, time) {
