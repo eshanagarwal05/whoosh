@@ -58,6 +58,11 @@ export default class WhooshExtension extends Extension {
         );
         this._updateSuppressionState();
 
+        this._overviewScrollBlockId = global.stage.connect(
+            'captured-event',
+            (_actor, event) => this._blockOverviewTouchpadScroll(event)
+        );
+
         this._touchscreen = new TouchscreenThrowController({
             getWindowAt: (x, y) =>
                 this._getWindowUnderPointer(x, y),
@@ -87,6 +92,11 @@ export default class WhooshExtension extends Extension {
     disable() {
         this._touchscreen?.disable();
         this._touchscreen = null;
+
+        if (this._overviewScrollBlockId) {
+            global.stage.disconnect(this._overviewScrollBlockId);
+            this._overviewScrollBlockId = 0;
+        }
 
         this._cancelPendingClose();
         this._gestureClaimActive = false;
@@ -353,12 +363,34 @@ export default class WhooshExtension extends Extension {
         }
     }
 
+    _blockOverviewTouchpadScroll(event) {
+        if (!Main.overview.visible ||
+            event.type() !== Clutter.EventType.SCROLL) {
+            return Clutter.EVENT_PROPAGATE;
+        }
+
+        if (event.get_scroll_direction() !== Clutter.ScrollDirection.SMOOTH)
+            return Clutter.EVENT_PROPAGATE;
+
+        const source = event.get_scroll_source();
+        const device = event.get_source_device();
+
+        const isTouchpad =
+            source === Clutter.ScrollSource.FINGER ||
+            device?.get_device_type() ===
+                Clutter.InputDeviceType.TOUCHPAD_DEVICE;
+
+        return isTouchpad
+            ? Clutter.EVENT_STOP
+            : Clutter.EVENT_PROPAGATE;
+    }
+
     _getOverviewWindowUnderPointer(px, py) {
         if (!Main.overview.visible)
             return null;
 
         let actor = global.stage.get_actor_at_pos(
-            Clutter.PickMode.REACTIVE,
+            Clutter.PickMode.ALL,
             px,
             py
         );
@@ -373,6 +405,51 @@ export default class WhooshExtension extends Extension {
                 return win;
 
             actor = actor.get_parent();
+        }
+
+        /*
+         * Pick results in Overview are not always descendants of the
+         * WindowPreview actor. Fall back to walking the Overview tree
+         * and compare the pointer against each preview's stage geometry.
+         */
+        const stack = [
+            Main.layoutManager.overviewGroup,
+        ];
+
+        while (stack.length > 0) {
+            const current = stack.pop();
+
+            if (!current)
+                continue;
+
+            const win =
+                current.metaWindow ??
+                current._delegate?.metaWindow ??
+                null;
+
+            if (win && typeof win.get_frame_rect === 'function') {
+                try {
+                    const [x, y] =
+                        current.get_transformed_position();
+                    const [width, height] =
+                        current.get_transformed_size();
+
+                    if (width > 0 &&
+                        height > 0 &&
+                        px >= x &&
+                        px < x + width &&
+                        py >= y &&
+                        py < y + height) {
+                        return win;
+                    }
+                } catch (_) {
+                }
+            }
+
+            const children = current.get_children?.() ?? [];
+
+            for (const child of children)
+                stack.push(child);
         }
 
         return null;
