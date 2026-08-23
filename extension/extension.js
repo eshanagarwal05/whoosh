@@ -67,6 +67,11 @@ export default class WhooshExtension extends WhooshCoreExtension {
         };
 
         connect('touchpad-enabled', () => this._onTouchpadSettingsChanged());
+        connect('touchscreen-enabled', () => this._resetTouchscreenState());
+        connect(
+            'four-finger-touchscreen-enabled',
+            () => this._resetFourFingerTouchState()
+        );
         connect('overview-enabled', () => this._onTouchpadTargetsChanged());
         connect('dash-enabled', () => this._onTouchpadTargetsChanged());
         connect('corner-tiling-enabled', () => {
@@ -173,6 +178,34 @@ export default class WhooshExtension extends WhooshCoreExtension {
         this._pinchAppTarget = null;
         this._gestureClaimActive = false;
         this._cancelPendingClose?.();
+    }
+
+    _resetTouchscreenState() {
+        if (!this._touchscreen)
+            return;
+
+        const pausedForMultitouch = this._singleTouchPausedForMultitouch;
+
+        this._touchscreen.disable();
+
+        if (!pausedForMultitouch)
+            this._touchscreen.enable();
+    }
+
+    _resetFourFingerTouchState() {
+        if (!this._fourFingerTouch)
+            return;
+
+        const singleTouchWasPaused = this._singleTouchPausedForMultitouch;
+
+        this._fourFingerTouch.disable();
+        this._fourFingerTouch.enable();
+        this._singleTouchPausedForMultitouch = false;
+
+        if (singleTouchWasPaused && this._touchscreen) {
+            this._touchscreen.disable();
+            this._touchscreen.enable();
+        }
     }
 
     _sendBackendConfiguration(force = false) {
