@@ -22,19 +22,23 @@ export default class WhooshExtension extends WhooshCoreExtension {
         this._settings = this.getSettings();
         this._settingsSignalIds = [];
         this._backendConfigLastSignal = 0;
-        this._fourFingerTouch = null;
         this._singleTouchPausedForMultitouch = false;
 
-        if (this._fourFingerTouchscreenEnabled())
-            this._createFourFingerController();
+        this._fourFingerTouch = new FourFingerTouchController({
+            getWindowAt: (x, y) => this._getWindowUnderPointer(x, y),
+            applyAction: (win, action) =>
+                this._applyFourFingerTouchAction(win, action),
+            onMultitouchBegin: () => this._pauseSingleTouchController(),
+            onMultitouchEnd: () => this._resumeSingleTouchController(),
+        });
+        this._fourFingerTouch.enable();
 
         try {
             super.enable();
-            this._syncTouchscreenController();
             this._connectSettings();
             this._sendBackendConfiguration(true);
         } catch (error) {
-            this._fourFingerTouch?.disable();
+            this._fourFingerTouch.disable();
             this._fourFingerTouch = null;
             this._disconnectSettings();
             this._settings = null;
@@ -63,11 +67,6 @@ export default class WhooshExtension extends WhooshCoreExtension {
         };
 
         connect('touchpad-enabled', () => this._onTouchpadSettingsChanged());
-        connect('touchscreen-enabled', () => this._syncTouchscreenController());
-        connect(
-            'four-finger-touchscreen-enabled',
-            () => this._syncFourFingerController()
-        );
         connect('overview-enabled', () => this._onTouchpadTargetsChanged());
         connect('dash-enabled', () => this._onTouchpadTargetsChanged());
         connect('corner-tiling-enabled', () => {
@@ -297,7 +296,17 @@ export default class WhooshExtension extends WhooshCoreExtension {
         return super._isInGestureZone(win, px, py);
     }
 
+    _isInTouchGestureZone(win, px, py) {
+        if (!this._touchscreenEnabled())
+            return false;
+
+        return super._isInTouchGestureZone(win, px, py);
+    }
+
     _applyTouchAction(win, action) {
+        if (!this._touchscreenEnabled())
+            return false;
+
         if (!this._cornerTilingEnabled() &&
             (action === 'top-left' ||
              action === 'top-right' ||
@@ -309,46 +318,12 @@ export default class WhooshExtension extends WhooshCoreExtension {
         return super._applyTouchAction(win, action);
     }
 
-    _createFourFingerController() {
-        if (this._fourFingerTouch)
-            return;
-
-        this._fourFingerTouch = new FourFingerTouchController({
-            getWindowAt: (x, y) => this._getWindowUnderPointer(x, y),
-            applyAction: (win, action) =>
-                this._applyFourFingerTouchAction(win, action),
-            onMultitouchBegin: () => this._pauseSingleTouchController(),
-            onMultitouchEnd: () => this._resumeSingleTouchController(),
-        });
-        this._fourFingerTouch.enable();
-    }
-
-    _syncFourFingerController() {
-        if (this._fourFingerTouchscreenEnabled()) {
-            this._createFourFingerController();
-            return;
-        }
-
-        this._fourFingerTouch?.disable();
-        this._fourFingerTouch = null;
-        this._singleTouchPausedForMultitouch = false;
-    }
-
-    _syncTouchscreenController() {
-        if (!this._touchscreen)
-            return;
-
-        if (this._touchscreenEnabled() &&
-            !this._singleTouchPausedForMultitouch) {
-            this._touchscreen.enable();
-        } else {
-            this._touchscreen.disable();
-        }
-    }
-
     _pauseSingleTouchController() {
-        if (this._singleTouchPausedForMultitouch || !this._touchscreen)
+        if (!this._fourFingerTouchscreenEnabled() ||
+            this._singleTouchPausedForMultitouch ||
+            !this._touchscreen) {
             return;
+        }
 
         this._touchscreen.disable();
         this._singleTouchPausedForMultitouch = true;
@@ -358,15 +333,16 @@ export default class WhooshExtension extends WhooshCoreExtension {
         if (!this._singleTouchPausedForMultitouch || !this._touchscreen)
             return;
 
-        if (this._touchscreenEnabled())
-            this._touchscreen.enable();
-
+        this._touchscreen.enable();
         this._singleTouchPausedForMultitouch = false;
     }
 
     _applyFourFingerTouchAction(win, action) {
-        if (!win || win.is_hidden())
+        if (!this._fourFingerTouchscreenEnabled() ||
+            !win ||
+            win.is_hidden()) {
             return false;
+        }
 
         const time = global.display.get_current_time();
 
