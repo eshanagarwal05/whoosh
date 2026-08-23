@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.whoosh" path="/org/gnome/shell/extensions/whoosh/">
+    <key name="touchpad-enabled" type="b">
+      <default>true</default>
+      <summary>Enable touchpad gestures</summary>
+      <description>Allow Whoosh to respond to supported two-finger swipe and pinch gestures.</description>
+    </key>
+    <key name="touchscreen-enabled" type="b">
+      <default>true</default>
+      <summary>Enable touchscreen title-bar gestures</summary>
+      <description>Allow one-finger touchscreen drag and throw gestures from window title bars.</description>
+    </key>
+    <key name="four-finger-touchscreen-enabled" type="b">
+      <default>true</default>
+      <summary>Enable four-finger touchscreen gestures</summary>
+      <description>Allow four-finger touchscreen pinch gestures to close or fullscreen windows.</description>
+    </key>
+    <key name="overview-enabled" type="b">
+      <default>true</default>
+      <summary>Enable Overview gestures</summary>
+      <description>Allow Whoosh touchpad gestures over window previews in GNOME Overview.</description>
+    </key>
+    <key name="dash-enabled" type="b">
+      <default>true</default>
+      <summary>Enable Dash gestures</summary>
+      <description>Allow Whoosh touchpad gestures over GNOME Dash and Dash to Dock application icons.</description>
+    </key>
+    <key name="corner-tiling-enabled" type="b">
+      <default>true</default>
+      <summary>Enable corner tiling</summary>
+      <description>Allow chained horizontal and vertical gestures to tile windows into screen corners.</description>
+    </key>
+    <key name="animations-enabled" type="b">
+      <default>true</default>
+      <summary>Enable Whoosh tile animations</summary>
+      <description>Animate Whoosh half-screen and corner tile operations.</description>
+    </key>
+    <key name="touchpad-sensitivity" type="s">
+      <choices>
+        <choice value="low"/>
+        <choice value="normal"/>
+        <choice value="high"/>
+      </choices>
+      <default>'normal'</default>
+      <summary>Touchpad gesture sensitivity</summary>
+      <description>Controls how much touchpad movement Whoosh requires before recognizing a gesture.</description>
+    </key>
+    <key name="corner-timing" type="s">
+      <choices>
+        <choice value="short"/>
+        <choice value="normal"/>
+        <choice value="long"/>
+      </choices>
+      <default>'normal'</default>
+      <summary>Corner gesture timing</summary>
+      <description>Controls how quickly the vertical part of a corner-tiling gesture must follow the horizontal part.</description>
+    </key>
+    <key name="animation-speed" type="s">
+      <choices>
+        <choice value="fast"/>
+        <choice value="normal"/>
+        <choice value="relaxed"/>
+      </choices>
+      <default>'normal'</default>
+      <summary>Whoosh animation speed</summary>
+      <description>Controls the duration of Whoosh tile animations.</description>
+    </key>
+  </schema>
+</schemalist>

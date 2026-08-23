@@ -44,9 +44,10 @@ Whoosh targets the topmost visible window under the pointer, even if it is not
 focused. Actions that leave the window visible focus it afterward. Minimize and
 close do not focus the window first.
 
-Corner chaining is intentionally short: the vertical turn must begin within
-300 ms of the horizontal tile recognition. This keeps ordinary up/down swipes
-from being mistaken for quarter tiling.
+Corner chaining is intentionally short by default: the vertical turn must begin
+within 300 ms of the horizontal tile recognition. This keeps ordinary up/down
+swipes from being mistaken for quarter tiling. The preferences window can make
+this timing shorter or longer.
 
 ## Architecture
 
@@ -54,6 +55,12 @@ libinput exposes two-finger movement as smooth scrolling rather than as a
 two-finger swipe gesture. The Whoosh backend reads only the detected touchpad,
 recognizes gestures, and emits action names over the system D-Bus. The GNOME
 Shell extension performs the actual window operations.
+
+Whoosh stores user preferences in a bundled GSettings schema. Extension-side
+settings apply immediately. Touchpad sensitivity and corner timing are sent to
+the input proxy over the existing system D-Bus channel, and the proxy forwards
+the selected preset to the gesture backend. The backend remains privileged but
+the preferences window does not require root access.
 
 Four-finger touchscreen pinches are handled separately inside the GNOME Shell
 extension from Clutter touch sequences. Their scale is calculated from the
@@ -84,7 +91,8 @@ Whoosh currently targets:
 - the `libinput` command-line tools
 - GNU coreutils (`stdbuf`)
 
-For building the extension locally, you also need Git, Make, and `zip`.
+For building the extension locally, you also need Git, Make, `zip`, and
+`glib-compile-schemas` from GLib.
 
 The extension metadata currently declares GNOME Shell 50 only. Other GNOME
 Shell versions are not supported unless they are explicitly added and tested.
@@ -163,7 +171,7 @@ journalctl -u whoosh-backend.service -b --no-pager
 make extension-zip
 ```
 
-This creates:
+The build validates and compiles the bundled GSettings schema, then creates:
 
 ```text
 dist/whoosh@eshanagarwal05.github.io.zip
@@ -186,6 +194,32 @@ You can confirm that GNOME sees the extension with:
 ```bash
 gnome-extensions info 'whoosh@eshanagarwal05.github.io'
 ```
+
+## Settings
+
+Open Whoosh from Extension Manager or GNOME Extensions and choose **Settings**.
+You can also open the preferences window directly:
+
+```bash
+gnome-extensions prefs 'whoosh@eshanagarwal05.github.io'
+```
+
+The current preferences include:
+
+- touchpad gestures
+- touchscreen title-bar gestures
+- four-finger touchscreen gestures
+- GNOME Overview gestures
+- Dash and Dash to Dock gestures
+- corner tiling
+- touchpad sensitivity: Low, Normal, or High
+- corner gesture timing: Short, Normal, or Long
+- tile animations and animation speed: Fast, Normal, or Relaxed
+- reset all settings to defaults
+
+Changes apply immediately while Whoosh is running. The default values preserve
+the behavior and recognition thresholds used before the settings GUI was
+introduced.
 
 ## Distribution support
 
@@ -221,6 +255,9 @@ Then confirm that the extension is installed and enabled:
 gnome-extensions info 'whoosh@eshanagarwal05.github.io'
 ```
 
+If the preferences window does not open, rebuild the extension and confirm the
+ZIP contains both `prefs.js` and `schemas/gschemas.compiled`.
+
 If you open a GitHub issue, please include:
 
 - distribution and version
@@ -248,6 +285,9 @@ cd ..
 make extension-zip
 gnome-extensions install --force dist/whoosh@eshanagarwal05.github.io.zip
 ```
+
+Rerunning `backend/install.sh` is required when updating to a version that
+changes backend gesture recognition or configuration support.
 
 Log out and back in after reinstalling the extension, then enable it again if
 necessary:
