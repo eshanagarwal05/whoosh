@@ -54,46 +54,205 @@ the requested geometry while the window's startup state settles. This prevents
 a delayed maximize/configure cycle from overriding an explicit half- or
 quarter-tile gesture.
 
-## Install the backend
+## Requirements
 
-On Fedora:
+Whoosh currently targets:
+
+- Linux
+- GNOME Shell 50
+- systemd
+- D-Bus
+- a touchpad exposed through libinput
+- Python 3 with PyGObject/Gio and `evdev`
+- the `libinput` command-line tools
+- GNU coreutils (`stdbuf`)
+
+For building the extension locally, you also need Git, Make, and `zip`.
+
+The extension metadata currently declares GNOME Shell 50 only. Other GNOME
+Shell versions are not supported unless they are explicitly added and tested.
+
+## Installation
+
+### 1. Clone Whoosh
 
 ```bash
-sudo dnf install libinput-utils python3-gobject coreutils
-cd backend
-./install.sh
+git clone https://github.com/eshanagarwal05/whoosh.git
+cd whoosh
 ```
 
-Verify:
+### 2. Install dependencies
+
+Choose the command for your distribution family.
+
+#### Fedora
+
+```bash
+sudo dnf install git make zip libinput-utils python3-gobject python3-evdev coreutils
+```
+
+#### Arch Linux, CachyOS, Manjaro, and other Arch-based distributions
+
+```bash
+sudo pacman -S --needed git make zip libinput-tools python-gobject python-evdev coreutils
+```
+
+Some Arch-based installations do not create `/etc/dbus-1/system.d` by default.
+If that directory is missing, create it before running the backend installer:
+
+```bash
+sudo install -d -m 0755 /etc/dbus-1/system.d
+```
+
+#### Debian, Ubuntu, and other Debian-based distributions
+
+```bash
+sudo apt update
+sudo apt install git make zip libinput-tools python3-gi python3-evdev coreutils
+```
+
+Package names vary on other distributions. The backend checks for the actual
+runtime requirements before installing and reports anything that is missing.
+
+### 3. Install the backend
+
+From the repository root:
+
+```bash
+cd backend
+./install.sh
+cd ..
+```
+
+The installer copies the backend and input proxy into `/usr/local/libexec`,
+installs the system D-Bus policy and systemd service, enables the service, and
+starts it immediately.
+
+Verify that the backend is running:
 
 ```bash
 systemctl status whoosh-backend.service
 ```
 
-## Install the extension locally
+For recent logs:
+
+```bash
+journalctl -u whoosh-backend.service -b --no-pager
+```
+
+### 4. Build the GNOME extension
+
+```bash
+make extension-zip
+```
+
+This creates:
+
+```text
+dist/whoosh@eshanagarwal05.github.io.zip
+```
+
+### 5. Install the extension locally
 
 ```bash
 gnome-extensions install --force dist/whoosh@eshanagarwal05.github.io.zip
 ```
 
-Log out and back in, then:
+Log out and back in, then enable Whoosh:
 
 ```bash
 gnome-extensions enable 'whoosh@eshanagarwal05.github.io'
 ```
 
-## Updating
+You can confirm that GNOME sees the extension with:
 
 ```bash
-cd ~/Downloads/whoosh
+gnome-extensions info 'whoosh@eshanagarwal05.github.io'
+```
+
+## Distribution support
+
+| Platform | Support status | Notes |
+|---|---|---|
+| Fedora with GNOME Shell 50 | Primary supported platform | Fedora package names are also shown by the backend installer when dependencies are missing. |
+| Arch Linux / CachyOS / Manjaro with GNOME Shell 50 | Supported installation path | Uses Arch package names. Some systems may need the D-Bus policy directory created first. |
+| Debian / Ubuntu with GNOME Shell 50 | Best-effort support | The required packages are available under Debian-style package names, but this path may receive less testing than Fedora/Arch. |
+| Other systemd distributions with GNOME Shell 50 | Best effort / community support | Should be portable when the required commands and Python modules are available. Package names and filesystem defaults may differ. |
+| GNOME Shell versions other than 50 | Not currently supported | The extension metadata currently declares Shell 50 only. |
+| KDE Plasma, Hyprland, COSMIC, and other non-GNOME desktops | Not supported by the GNOME extension | The backend architecture may be reusable, but the current frontend depends on GNOME Shell APIs. |
+
+Whoosh is intentionally distribution-light: the gesture backend depends on
+standard Linux components rather than Fedora-specific APIs. Distribution
+support mostly comes down to package names, systemd/D-Bus layout, GNOME Shell
+version, and the touchpad being visible to libinput.
+
+## Troubleshooting and support
+
+If Whoosh does not respond to gestures, check the backend first:
+
+```bash
+systemctl status whoosh-backend.service
+journalctl -u whoosh-backend.service -b --no-pager
+```
+
+Then confirm that the extension is installed and enabled:
+
+```bash
+gnome-extensions info 'whoosh@eshanagarwal05.github.io'
+```
+
+If you open a GitHub issue, please include:
+
+- distribution and version
+- GNOME Shell version (`gnome-shell --version`)
+- session type (`echo $XDG_SESSION_TYPE`)
+- Whoosh version or commit
+- touchpad model if known
+- output from `systemctl status whoosh-backend.service`
+- relevant lines from `journalctl -u whoosh-backend.service -b`
+- a description of the gesture you performed and what happened instead
+
+Issues and compatibility reports are welcome at:
+
+https://github.com/eshanagarwal05/whoosh/issues
+
+## Updating
+
+From your existing clone:
+
+```bash
 git pull
 cd backend
 ./install.sh
 cd ..
 make extension-zip
+gnome-extensions install --force dist/whoosh@eshanagarwal05.github.io.zip
 ```
 
-Then reinstall the generated extension ZIP and log out/in.
+Log out and back in after reinstalling the extension, then enable it again if
+necessary:
+
+```bash
+gnome-extensions enable 'whoosh@eshanagarwal05.github.io'
+```
+
+## Uninstalling
+
+Remove the backend:
+
+```bash
+cd backend
+./uninstall.sh
+cd ..
+```
+
+Remove the GNOME extension:
+
+```bash
+gnome-extensions uninstall 'whoosh@eshanagarwal05.github.io'
+```
+
+Log out and back in after removing the extension.
 
 ## GNOME Extensions submission
 
