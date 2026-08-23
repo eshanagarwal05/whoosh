@@ -355,6 +355,11 @@ class TouchpadProxy:
         if self.candidate:
             self.buffered_packets.append(events)
 
+            if time.monotonic() - self.candidate_started > DECISION_TIMEOUT:
+                self._replay_buffer()
+                self._reset_candidate()
+                return
+
             if not self.suppression.active:
                 self._replay_buffer()
                 self._reset_candidate()
