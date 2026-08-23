@@ -137,6 +137,7 @@ class TouchpadProxy:
         self.action_time = 0.0
         self.action_y = 0.0
         self.corner_emitted = False
+        self.gesture_claimed = False
 
     def _active_points(self):
         points = []
@@ -274,6 +275,20 @@ class TouchpadProxy:
         self.base_distance = None
         self._reset_candidate(clear_base=False)
 
+    def _begin_gesture_claim(self):
+        if self.gesture_claimed:
+            return
+
+        self.gesture_claimed = True
+        self.send_action("gesture_claim_begin")
+
+    def _end_gesture_claim_if_released(self, count):
+        if not self.gesture_claimed or count != 0:
+            return
+
+        self.send_action("gesture_claim_end")
+        self.gesture_claimed = False
+
     def _maybe_emit_action(self, centroid):
         if self.base_centroid is None:
             return
@@ -340,6 +355,7 @@ class TouchpadProxy:
                     self.hidden_slots,
                 )
                 self._reset_suppression()
+                self._end_gesture_claim_if_released(count)
                 return
 
             centroid, _distance = self._geometry()
@@ -355,19 +371,16 @@ class TouchpadProxy:
         if self.candidate:
             self.buffered_packets.append(events)
 
-            if time.monotonic() - self.candidate_started > DECISION_TIMEOUT:
-                self._replay_buffer()
-                self._reset_candidate()
-                return
-
-            if not self.suppression.active:
-                self._replay_buffer()
-                self._reset_candidate()
-                return
-
             if count != 2:
-                self._replay_buffer()
-                self._reset_candidate()
+                if self.intent_committed:
+                    self._forward_packet_excluding_slots(
+                        events,
+                        self.hidden_slots,
+                    )
+                    self._reset_candidate()
+                else:
+                    self._replay_buffer()
+                    self._reset_candidate()
                 return
 
             centroid, distance = self._geometry()
@@ -420,7 +433,7 @@ class TouchpadProxy:
                 self.suppressed = True
                 self.suppression_kind = "pinch"
 
-                self.send_action("gesture_claim_begin")
+                self._begin_gesture_claim()
                 self.send_action("pinch_begin")
                 self.send_action(action)
                 return
@@ -436,7 +449,21 @@ class TouchpadProxy:
                 self.candidate = False
                 self.suppressed = True
                 self.suppression_kind = "swipe"
+                self._begin_gesture_claim()
                 self._maybe_emit_action(centroid)
+                return
+
+            if not self.suppression.active and not self.intent_committed:
+                self._replay_buffer()
+                self._reset_candidate()
+                return
+
+            if (
+                time.monotonic() - self.candidate_started > DECISION_TIMEOUT
+                and not self.intent_committed
+            ):
+                self._replay_buffer()
+                self._reset_candidate()
                 return
 
             return
@@ -458,6 +485,7 @@ class TouchpadProxy:
                 return
 
         self._forward_packet(events)
+        self._end_gesture_claim_if_released(count)
 
     def handle_event(self, event):
         self.packet.append(event)
