@@ -261,6 +261,18 @@ export default class WhooshExtension extends WhooshCoreExtension {
         if (!this._cornerTilingEnabled() && action.startsWith('corner_'))
             return;
 
+        if (action === 'pinch_in' && this._gestureClaimActive) {
+            this._gestureClaimActive = false;
+
+            try {
+                super._handleAction(action);
+            } finally {
+                this._gestureClaimActive = true;
+            }
+
+            return;
+        }
+
         if (this._cornerTilingEnabled() &&
             (action === 'up' || action === 'down') &&
             this._lastHorizontal) {
