@@ -151,6 +151,7 @@ class GestureRecognizer:
         self.corner_triggered = False
         self.pinch_active = False
         self.pinch_scale = 1.0
+        self.pinch_triggered = False
         self.sensitivity = "normal"
         self.corner_timing = "normal"
         self.apply_configuration("normal", "normal", log=False)
@@ -176,6 +177,7 @@ class GestureRecognizer:
         self.reset_scroll()
         self.pinch_active = False
         self.pinch_scale = 1.0
+        self.pinch_triggered = False
 
         if log:
             self.log(
@@ -268,6 +270,7 @@ class GestureRecognizer:
             if int(match.group(1)) == 2:
                 self.pinch_active = True
                 self.pinch_scale = 1.0
+                self.pinch_triggered = False
                 self.emit("pinch_begin")
             return
 
@@ -275,16 +278,26 @@ class GestureRecognizer:
         if match and self.pinch_active:
             if int(match.group(1)) == 2:
                 self.pinch_scale = float(match.group(2))
+
+                if not self.pinch_triggered:
+                    if self.pinch_scale <= self.pinch_in_threshold:
+                        self.pinch_triggered = True
+                        self.emit("pinch_in")
+                    elif self.pinch_scale >= self.pinch_out_threshold:
+                        self.pinch_triggered = True
+                        self.emit("pinch_out")
             return
 
         match = PINCH_END_RE.search(line)
         if match and self.pinch_active:
             fingers = int(match.group(1))
             scale = self.pinch_scale
+            triggered = self.pinch_triggered
             self.pinch_active = False
             self.pinch_scale = 1.0
+            self.pinch_triggered = False
 
-            if fingers != 2:
+            if fingers != 2 or triggered:
                 return
 
             if scale <= self.pinch_in_threshold:
