@@ -8,6 +8,7 @@ const TOUCH_COUNT = 4;
 const PINCH_IN_SCALE = 0.72;
 const PINCH_OUT_SCALE = 1.28;
 const MIN_INITIAL_SPREAD = 24;
+const MULTITOUCH_STALE_MS = 2000;
 
 export class FourFingerTouchController {
     constructor({
@@ -25,6 +26,7 @@ export class FourFingerTouchController {
         this._points = new Map();
         this._gesture = null;
         this._multitouchActive = false;
+        this._staleWatchdogSource = 0;
         this._applySources = new Set();
     }
 
@@ -48,9 +50,10 @@ export class FourFingerTouchController {
             GLib.source_remove(sourceId);
 
         this._applySources.clear();
+        this._cancelStaleWatchdog();
         this._points.clear();
         this._gesture = null;
-        this._multitouchActive = false;
+        this._endMultitouch();
     }
 
     _handleCapturedEvent(event) {
@@ -100,15 +103,54 @@ export class FourFingerTouchController {
         }
 
         if (this._points.size === 0) {
+            this._cancelStaleWatchdog();
             this._finishGesture();
-
-            if (this._multitouchActive) {
-                this._multitouchActive = false;
-                this._onMultitouchEnd?.();
-            }
+            this._endMultitouch();
+        } else if (this._multitouchActive) {
+            this._refreshStaleWatchdog();
         }
 
         return Clutter.EVENT_PROPAGATE;
+    }
+
+    _refreshStaleWatchdog() {
+        this._cancelStaleWatchdog();
+
+        this._staleWatchdogSource = GLib.timeout_add(
+            GLib.PRIORITY_DEFAULT,
+            MULTITOUCH_STALE_MS,
+            () => {
+                this._staleWatchdogSource = 0;
+
+                if (!this._multitouchActive)
+                    return GLib.SOURCE_REMOVE;
+
+                if (this._gesture)
+                    this._gesture.cancelled = true;
+
+                this._points.clear();
+                this._finishGesture();
+                this._endMultitouch();
+
+                return GLib.SOURCE_REMOVE;
+            }
+        );
+    }
+
+    _cancelStaleWatchdog() {
+        if (!this._staleWatchdogSource)
+            return;
+
+        GLib.source_remove(this._staleWatchdogSource);
+        this._staleWatchdogSource = 0;
+    }
+
+    _endMultitouch() {
+        if (!this._multitouchActive)
+            return;
+
+        this._multitouchActive = false;
+        this._onMultitouchEnd?.();
     }
 
     _sequenceKey(event) {
