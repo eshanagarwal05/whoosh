@@ -24,7 +24,6 @@ INTERFACE_NAME = "io.github.eshanagarwal05.Whoosh"
 
 AXIS_DOMINANCE = 1.25
 SCROLL_STREAM_GAP = 0.18
-RELEASE_ACTION_SETTLE_SECONDS = 0.05
 
 SENSITIVITY_PRESETS = {
     "low": {
@@ -68,9 +67,6 @@ PROXY_ACTIONS = {
     "corner_left_down",
     "corner_right_up",
     "corner_right_down",
-}
-PROXY_RELEASE_ACTIONS = {
-    "down",
 }
 
 SCROLL_RE = re.compile(
@@ -298,9 +294,6 @@ class GestureRecognizer:
 
 
 def _proxy_action_reader(recognizer):
-    gesture_claimed = False
-    pending_release_actions = []
-
     for line in sys.stdin:
         raw = line.strip()
 
@@ -312,30 +305,6 @@ def _proxy_action_reader(recognizer):
 
         action = raw
         if action not in PROXY_ACTIONS:
-            continue
-
-        if action == "gesture_claim_begin":
-            gesture_claimed = True
-            pending_release_actions.clear()
-            recognizer.emit(action)
-            continue
-
-        if action == "gesture_claim_end":
-            recognizer.emit(action)
-            gesture_claimed = False
-
-            if pending_release_actions:
-                time.sleep(RELEASE_ACTION_SETTLE_SECONDS)
-
-                for pending_action in pending_release_actions:
-                    recognizer.emit(pending_action)
-
-                pending_release_actions.clear()
-
-            continue
-
-        if gesture_claimed and action in PROXY_RELEASE_ACTIONS:
-            pending_release_actions.append(action)
             continue
 
         recognizer.emit(action)
