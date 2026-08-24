@@ -24,7 +24,6 @@ INTERFACE_NAME = "io.github.eshanagarwal05.Whoosh"
 
 AXIS_DOMINANCE = 1.25
 SCROLL_STREAM_GAP = 0.18
-RELEASE_ACTION_SETTLE_SECONDS = 0.05
 
 SENSITIVITY_PRESETS = {
     "low": {
@@ -68,9 +67,6 @@ PROXY_ACTIONS = {
     "corner_left_down",
     "corner_right_up",
     "corner_right_down",
-}
-PROXY_RELEASE_ACTIONS = {
-    "down",
 }
 
 SCROLL_RE = re.compile(
@@ -155,6 +151,7 @@ class GestureRecognizer:
         self.corner_triggered = False
         self.pinch_active = False
         self.pinch_scale = 1.0
+        self.pinch_triggered = False
         self.sensitivity = "normal"
         self.corner_timing = "normal"
         self.apply_configuration("normal", "normal", log=False)
@@ -180,6 +177,7 @@ class GestureRecognizer:
         self.reset_scroll()
         self.pinch_active = False
         self.pinch_scale = 1.0
+        self.pinch_triggered = False
 
         if log:
             self.log(
@@ -272,6 +270,7 @@ class GestureRecognizer:
             if int(match.group(1)) == 2:
                 self.pinch_active = True
                 self.pinch_scale = 1.0
+                self.pinch_triggered = False
                 self.emit("pinch_begin")
             return
 
@@ -279,16 +278,26 @@ class GestureRecognizer:
         if match and self.pinch_active:
             if int(match.group(1)) == 2:
                 self.pinch_scale = float(match.group(2))
+
+                if not self.pinch_triggered:
+                    if self.pinch_scale <= self.pinch_in_threshold:
+                        self.pinch_triggered = True
+                        self.emit("pinch_in")
+                    elif self.pinch_scale >= self.pinch_out_threshold:
+                        self.pinch_triggered = True
+                        self.emit("pinch_out")
             return
 
         match = PINCH_END_RE.search(line)
         if match and self.pinch_active:
             fingers = int(match.group(1))
             scale = self.pinch_scale
+            triggered = self.pinch_triggered
             self.pinch_active = False
             self.pinch_scale = 1.0
+            self.pinch_triggered = False
 
-            if fingers != 2:
+            if fingers != 2 or triggered:
                 return
 
             if scale <= self.pinch_in_threshold:
@@ -298,9 +307,6 @@ class GestureRecognizer:
 
 
 def _proxy_action_reader(recognizer):
-    gesture_claimed = False
-    pending_release_actions = []
-
     for line in sys.stdin:
         raw = line.strip()
 
@@ -312,30 +318,6 @@ def _proxy_action_reader(recognizer):
 
         action = raw
         if action not in PROXY_ACTIONS:
-            continue
-
-        if action == "gesture_claim_begin":
-            gesture_claimed = True
-            pending_release_actions.clear()
-            recognizer.emit(action)
-            continue
-
-        if action == "gesture_claim_end":
-            recognizer.emit(action)
-            gesture_claimed = False
-
-            if pending_release_actions:
-                time.sleep(RELEASE_ACTION_SETTLE_SECONDS)
-
-                for pending_action in pending_release_actions:
-                    recognizer.emit(pending_action)
-
-                pending_release_actions.clear()
-
-            continue
-
-        if gesture_claimed and action in PROXY_RELEASE_ACTIONS:
-            pending_release_actions.append(action)
             continue
 
         recognizer.emit(action)
