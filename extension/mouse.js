@@ -5,6 +5,7 @@ import Clutter from 'gi://Clutter';
 
 const DIRECTION_DOMINANCE = 1.15;
 const CORNER_THRESHOLD_RATIO = 0.85;
+const DEBUG_PREFIX = 'Whoosh mouse debug';
 
 const BUTTON_NUMBERS = {
     primary: [1],
@@ -45,6 +46,12 @@ export class MouseGestureController {
             'captured-event',
             (_actor, event) => this._handleCapturedEvent(event)
         );
+
+        this._debug(
+            `enabled signal=${this._capturedEventId} ` +
+            `active=${this._isEnabled()} button=${this._getButton()} ` +
+            `threshold=${this._getThreshold()}`
+        );
     }
 
     disable() {
@@ -80,19 +87,40 @@ export class MouseGestureController {
     }
 
     _handleButtonPress(event) {
-        if (this._session || !this._isEnabled())
-            return Clutter.EVENT_PROPAGATE;
-
-        const buttons = BUTTON_NUMBERS[this._getButton()] ?? [2];
+        const enabled = this._isEnabled();
+        const configuredButton = this._getButton();
+        const buttons = BUTTON_NUMBERS[configuredButton] ?? [2];
         const button = event.get_button();
 
-        if (!buttons.includes(button))
+        this._debug(
+            `press actual=${button} configured=${configuredButton} ` +
+            `accepted=${buttons.join(',')} enabled=${enabled} ` +
+            `session=${Boolean(this._session)}`
+        );
+
+        if (this._session || !enabled)
             return Clutter.EVENT_PROPAGATE;
+
+        if (!buttons.includes(button)) {
+            this._debug('press rejected: button does not match setting');
+            return Clutter.EVENT_PROPAGATE;
+        }
 
         const [x, y] = event.get_coords();
         const win = this._getWindowAt(x, y);
+        const inTitlebar = Boolean(win && this._isTitlebar(win, x, y));
 
-        if (!win || !this._isTitlebar(win, x, y))
+        if (win) {
+            const rect = win.get_frame_rect();
+            this._debug(
+                `target found=true zone=${inTitlebar} pointer=${x},${y} ` +
+                `frame=${rect.x},${rect.y},${rect.width},${rect.height}`
+            );
+        } else {
+            this._debug(`target found=false pointer=${x},${y}`);
+        }
+
+        if (!win || !inTitlebar)
             return Clutter.EVENT_PROPAGATE;
 
         this._session = {
@@ -107,6 +135,7 @@ export class MouseGestureController {
         };
 
         this._inputGrab = global.stage.grab(global.stage);
+        this._debug(`session started button=${button}`);
 
         // The selected button is reserved for Whoosh in the title-bar zone.
         return Clutter.EVENT_STOP;
@@ -131,12 +160,19 @@ export class MouseGestureController {
                 session.side = dx < 0 ? 'left' : 'right';
                 session.phase = 'horizontal';
                 session.cornerOriginY = y;
+                this._debug(
+                    `horizontal commit action=${session.side} dx=${dx} dy=${dy}`
+                );
                 this._apply(session, session.side);
             } else if (
                 absY >= threshold &&
                 absY >= absX * DIRECTION_DOMINANCE
             ) {
                 session.phase = 'complete';
+                this._debug(
+                    `vertical commit action=${dy < 0 ? 'maximize' : 'minimize'} ` +
+                    `dx=${dx} dy=${dy}`
+                );
                 this._apply(session, dy < 0 ? 'maximize' : 'minimize');
             }
         } else if (
@@ -149,6 +185,10 @@ export class MouseGestureController {
             if (Math.abs(cornerDy) >= cornerThreshold) {
                 const vertical = cornerDy < 0 ? 'top' : 'bottom';
                 session.phase = 'complete';
+                this._debug(
+                    `corner commit action=${vertical}-${session.side} ` +
+                    `cornerDy=${cornerDy}`
+                );
                 this._apply(session, `${vertical}-${session.side}`);
             }
         }
@@ -157,7 +197,12 @@ export class MouseGestureController {
     }
 
     _handleButtonRelease(event) {
-        if (event.get_button() !== this._session.button)
+        const button = event.get_button();
+        this._debug(
+            `release actual=${button} expected=${this._session.button}`
+        );
+
+        if (button !== this._session.button)
             return Clutter.EVENT_PROPAGATE;
 
         this.reset();
@@ -170,7 +215,8 @@ export class MouseGestureController {
             return;
 
         try {
-            this._applyAction(win, action);
+            const applied = this._applyAction(win, action);
+            this._debug(`apply action=${action} result=${applied}`);
         } catch (error) {
             console.error(`Whoosh mouse action failed: ${error}`);
         }
@@ -187,5 +233,9 @@ export class MouseGestureController {
         }
 
         this._inputGrab = null;
+    }
+
+    _debug(message) {
+        console.log(`${DEBUG_PREFIX}: ${message}`);
     }
 }
