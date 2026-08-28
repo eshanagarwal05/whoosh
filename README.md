@@ -86,9 +86,12 @@ extension from Clutter touch sequences. Their scale is calculated from the
 average distance of the four touch points from their centroid, which separates
 an inward/outward pinch from ordinary four-finger translation.
 
-Mouse scroll gestures are recognized inside the GNOME Shell extension. Because
-they do not use the privileged touchpad proxy, enabling them does not change
-ordinary pointer input outside the title-bar gesture zone.
+The privileged Whoosh backend observes kernel mouse-wheel events and sends only
+their direction to the GNOME Shell extension over D-Bus. This is necessary
+because GNOME Shell does not expose mouse events delivered directly to normal
+application windows. The extension polls the pointer only while mouse gestures
+are enabled, targets the title-bar window, and leaves scrolling outside that
+zone unchanged.
 
 Half and quarter tiling keep Mutter's `move_resize_frame()` call as the source
 of truth and add a compositor-only visual overlay inspired by GNOME Shell's
