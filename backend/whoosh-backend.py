@@ -34,6 +34,7 @@ MOUSE_SCROLL_AXES = {
     ecodes.REL_WHEEL,
     ecodes.REL_HWHEEL,
 }
+MOUSE_SCROLL_DEDUP_SECONDS = 0.06
 
 SENSITIVITY_PRESETS = {
     "low": {
@@ -321,6 +322,8 @@ class MouseScrollMonitor:
         self.recognizer = recognizer
         self.devices = {}
         self.skipped_paths = set()
+        self.last_direction = None
+        self.last_direction_time = 0.0
 
     def log(self, message):
         self.recognizer.log(f"mouse monitor {message}")
@@ -380,6 +383,16 @@ class MouseScrollMonitor:
             direction = "right" if event.value > 0 else "left"
         else:
             return
+
+        now = time.monotonic()
+        if (
+            direction == self.last_direction
+            and now - self.last_direction_time <= MOUSE_SCROLL_DEDUP_SECONDS
+        ):
+            return
+
+        self.last_direction = direction
+        self.last_direction_time = now
 
         source = (
             "openlogi"
