@@ -8,6 +8,9 @@ const OPENLOGI_DEVICE_NAME = 'OpenLogi action injector';
 const RECENT_TITLEBAR_GRACE_US = 750_000;
 const POINTER_POLL_MS = 30;
 const REPEAT_GUARD_US = 120_000;
+const HORIZONTAL_SCROLL_STEPS = 2;
+const HORIZONTAL_SCROLL_GAP_US = 350_000;
+const HORIZONTAL_SCROLL_GUARD_US = 700_000;
 const SMOOTH_SCROLL_THRESHOLD = 1;
 const DIRECTION_DOMINANCE = 1.15;
 
@@ -67,12 +70,18 @@ export class MouseScrollController {
         this._recentTitlebarTarget = null;
         this._lastHorizontal = null;
         this._lastAction = null;
+        this._horizontalScrollPending = null;
+        this._horizontalScrollGuard = null;
         this._smoothTarget = null;
         this._smoothX = 0;
         this._smoothY = 0;
     }
 
-    handleDirection(direction, allowRecentTarget = false) {
+    handleDirection(
+        direction,
+        allowRecentTarget = false,
+        isScroll = false
+    ) {
         if (!this._isEnabled())
             return false;
 
@@ -100,7 +109,10 @@ export class MouseScrollController {
             return false;
         }
 
-        this._dispatchDirection(target, direction, now);
+        if (isScroll)
+            this._dispatchScrollDirection(target, direction, now);
+        else
+            this._dispatchDirection(target, direction, now);
         console.log(
             `Whoosh mouse gesture handled direction=${direction} ` +
             `recent=${allowRecentTarget}`
@@ -144,7 +156,7 @@ export class MouseScrollController {
         if (!direction)
             return Clutter.EVENT_STOP;
 
-        this._dispatchDirection(target, direction, now);
+        this._dispatchScrollDirection(target, direction, now);
         return Clutter.EVENT_STOP;
     }
 
@@ -243,6 +255,62 @@ export class MouseScrollController {
             direction: tilingDirection,
             when: now,
         };
+    }
+
+    _dispatchScrollDirection(target, direction, now) {
+        const horizontal = direction === 'left' || direction === 'right';
+        const guard = this._activeHorizontalScrollGuard(now);
+
+        if (!horizontal) {
+            this._horizontalScrollPending = null;
+            this._dispatchDirection(guard?.window ?? target, direction, now);
+            return true;
+        }
+
+        if (guard)
+            return false;
+
+        const pending = this._horizontalScrollPending;
+        const continuesPending =
+            pending?.window === target &&
+            pending.direction === direction &&
+            now - pending.when <= HORIZONTAL_SCROLL_GAP_US;
+
+        if (!continuesPending) {
+            this._horizontalScrollPending = {
+                window: target,
+                direction,
+                count: 1,
+                when: now,
+            };
+            return false;
+        }
+
+        pending.count += 1;
+        pending.when = now;
+
+        if (pending.count < HORIZONTAL_SCROLL_STEPS)
+            return false;
+
+        this._horizontalScrollPending = null;
+        this._dispatchDirection(target, direction, now);
+        this._horizontalScrollGuard = {window: target, when: now};
+        return true;
+    }
+
+    _activeHorizontalScrollGuard(now) {
+        const guard = this._horizontalScrollGuard;
+
+        if (!guard)
+            return null;
+
+        if (now - guard.when > HORIZONTAL_SCROLL_GUARD_US ||
+            !guard.window || guard.window.is_hidden()) {
+            this._horizontalScrollGuard = null;
+            return null;
+        }
+
+        return guard;
     }
 
     _isTouchpadEvent(event) {
