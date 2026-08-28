@@ -78,10 +78,31 @@ export class MouseScrollController {
         const target = this._targetAtPointer(now) ??
             (allowRecentTarget ? this._recentTarget(now) : null);
 
-        if (!target)
+        if (!target) {
+            const [x, y] = global.get_pointer();
+            const pointerWindow = this._getWindowAt(x, y);
+            const inTitlebar = pointerWindow
+                ? this._isTitlebar(pointerWindow, x, y)
+                : false;
+            const recentAge = this._recentTitlebarTarget
+                ? now - this._recentTitlebarTarget.when
+                : -1;
+
+            console.log(
+                `Whoosh mouse scroll ignored direction=${direction} ` +
+                `pointer=${Math.round(x)},${Math.round(y)} ` +
+                `window=${Boolean(pointerWindow)} ` +
+                `titlebar=${inTitlebar} recentAgeUs=${recentAge} ` +
+                `allowRecent=${allowRecentTarget}`
+            );
             return false;
+        }
 
         this._dispatchDirection(target, direction, now);
+        console.log(
+            `Whoosh mouse scroll handled direction=${direction} ` +
+            `recent=${allowRecentTarget}`
+        );
         return true;
     }
 
