@@ -29,6 +29,12 @@ The selected button is reserved for Whoosh while the pointer is in the mouse
 gesture zone. The ends of the title bar remain native so window-control buttons
 continue to work. Mouse gestures are disabled by default.
 
+When using OpenLogi on Linux, configure a selected side button as its native
+mouse action (`MouseBack` or `MouseForward`). Whoosh accepts both Linux event
+code variants for each side button, so OpenLogi can keep its input hook enabled.
+An OpenLogi button promoted to gesture mode is consumed by OpenLogi and cannot
+also begin Whoosh's own mouse gesture recognizer.
+
 ### Touchscreen controls
 
 | Gesture over a visible window | Action |
