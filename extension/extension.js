@@ -13,7 +13,10 @@ import {MouseScrollController} from './mouse.js';
 
 const OBJECT_PATH = '/io/github/eshanagarwal05/Whoosh';
 const INTERFACE_NAME = 'io.github.eshanagarwal05.Whoosh';
+const MOUSE_BUS_NAME = 'io.github.eshanagarwal05.Whoosh.Mouse';
 const CONFIG_HEARTBEAT_US = 1_000_000;
+const MOUSE_CONFIG_HEARTBEAT_US = 1_000_000;
+const MOUSE_SUPPRESSION_HEARTBEAT_US = 100_000;
 const CORE_CORNER_CHAIN_US = 300_000;
 const TILE_SETTLE_MS = 16;
 const TILE_SETTLE_ATTEMPTS = 4;
@@ -23,6 +26,10 @@ export default class WhooshExtension extends WhooshCoreExtension {
         this._settings = this.getSettings();
         this._settingsSignalIds = [];
         this._backendConfigLastSignal = 0;
+        this._mouseConfigLastSignal = 0;
+        this._mouseSuppressionLastSignal = 0;
+        this._mouseSuppressionArmed = null;
+        this._mouseButtonSignalId = 0;
         this._singleTouchPausedForMultitouch = false;
 
         this._mouse = new MouseScrollController({
@@ -31,11 +38,29 @@ export default class WhooshExtension extends WhooshCoreExtension {
                 this._isInMouseGestureZone(win, x, y),
             applyAction: (win, action) =>
                 this._applyMouseAction(win, action),
-            isEnabled: () => this._mouseEnabled(),
+            isEnabled: () =>
+                this._mouseEnabled() || this._mouseButtonEnabled(),
+            isScrollEnabled: () => this._mouseEnabled(),
             isCornerTilingEnabled: () => this._cornerTilingEnabled(),
             getCornerChainUs: () => this._cornerChainUs(),
         });
         this._mouse.enable();
+
+        this._mouseButtonSignalId = Gio.DBus.system.signal_subscribe(
+            MOUSE_BUS_NAME,
+            INTERFACE_NAME,
+            'MouseGesture',
+            OBJECT_PATH,
+            null,
+            Gio.DBusSignalFlags.NONE,
+            (_connection, _sender, _objectPath, _interfaceName, _signalName, parameters) => {
+                const [direction] = parameters.deep_unpack();
+                if (this._mouseButtonEnabled() &&
+                    /^(left|right|up|down)$/.test(direction)) {
+                    this._mouse?.handleDirection(direction, true);
+                }
+            }
+        );
 
         this._fourFingerTouch = new FourFingerTouchController({
             getWindowAt: (x, y) => this._getWindowUnderPointer(x, y),
@@ -50,7 +75,14 @@ export default class WhooshExtension extends WhooshCoreExtension {
             super.enable();
             this._connectSettings();
             this._sendBackendConfiguration(true);
+            this._sendMouseConfiguration(true);
         } catch (error) {
+            if (this._mouseButtonSignalId) {
+                Gio.DBus.system.signal_unsubscribe(
+                    this._mouseButtonSignalId
+                );
+                this._mouseButtonSignalId = 0;
+            }
             this._mouse.disable();
             this._mouse = null;
             this._fourFingerTouch.disable();
@@ -62,7 +94,14 @@ export default class WhooshExtension extends WhooshCoreExtension {
     }
 
     disable() {
+        this._sendMouseSuppressionState(false);
+        this._sendMouseConfiguration(true, false);
         this._disconnectSettings();
+
+        if (this._mouseButtonSignalId) {
+            Gio.DBus.system.signal_unsubscribe(this._mouseButtonSignalId);
+            this._mouseButtonSignalId = 0;
+        }
 
         this._fourFingerTouch?.disable();
         this._fourFingerTouch = null;
@@ -73,6 +112,9 @@ export default class WhooshExtension extends WhooshCoreExtension {
         super.disable();
 
         this._backendConfigLastSignal = 0;
+        this._mouseConfigLastSignal = 0;
+        this._mouseSuppressionLastSignal = 0;
+        this._mouseSuppressionArmed = null;
         this._settings = null;
     }
 
@@ -85,6 +127,19 @@ export default class WhooshExtension extends WhooshCoreExtension {
 
         connect('touchpad-enabled', () => this._onTouchpadSettingsChanged());
         connect('mouse-enabled', () => this._resetMouseState());
+        connect('mouse-button-enabled', () => {
+            this._resetMouseState();
+            this._sendMouseConfiguration(true);
+            this._updateMouseButtonState();
+        });
+        connect('mouse-button', () => {
+            this._resetMouseState();
+            this._sendMouseConfiguration(true);
+        });
+        connect('mouse-sensitivity', () => {
+            this._resetMouseState();
+            this._sendMouseConfiguration(true);
+        });
         connect('touchscreen-enabled', () => this._resetTouchscreenState());
         connect(
             'four-finger-touchscreen-enabled',
@@ -126,6 +181,10 @@ export default class WhooshExtension extends WhooshCoreExtension {
 
     _mouseEnabled() {
         return this._settings?.get_boolean('mouse-enabled') ?? false;
+    }
+
+    _mouseButtonEnabled() {
+        return this._settings?.get_boolean('mouse-button-enabled') ?? false;
     }
 
     _fourFingerTouchscreenEnabled() {
@@ -263,20 +322,98 @@ export default class WhooshExtension extends WhooshCoreExtension {
         }
     }
 
+    _sendMouseConfiguration(force = false, enabledOverride = null) {
+        if (!this._settings)
+            return;
+
+        const now = GLib.get_monotonic_time();
+        if (!force &&
+            now - this._mouseConfigLastSignal <
+                MOUSE_CONFIG_HEARTBEAT_US) {
+            return;
+        }
+
+        const enabled = enabledOverride ?? this._mouseButtonEnabled();
+        const button = this._settings.get_string('mouse-button');
+        const sensitivity = this._settings.get_string('mouse-sensitivity');
+
+        try {
+            Gio.DBus.system.emit_signal(
+                null,
+                OBJECT_PATH,
+                INTERFACE_NAME,
+                'MouseConfiguration',
+                new GLib.Variant(
+                    '(bss)',
+                    [enabled, button, sensitivity]
+                )
+            );
+            this._mouseConfigLastSignal = now;
+        } catch (error) {
+            console.error(`Whoosh mouse configuration failed: ${error}`);
+        }
+    }
+
+    _sendMouseSuppressionState(armed) {
+        try {
+            Gio.DBus.system.emit_signal(
+                null,
+                OBJECT_PATH,
+                INTERFACE_NAME,
+                'MouseSuppression',
+                new GLib.Variant('(b)', [armed])
+            );
+        } catch (error) {
+            console.error(`Whoosh mouse suppression failed: ${error}`);
+        }
+    }
+
+    _updateMouseButtonState() {
+        const enabled = this._mouseButtonEnabled();
+        let armed = false;
+
+        if (enabled) {
+            const [px, py] = global.get_pointer();
+            const win = this._getWindowUnderPointer(px, py);
+            armed = Boolean(
+                win && this._isInMouseGestureZone(win, px, py)
+            );
+        }
+
+        const now = GLib.get_monotonic_time();
+        const stateChanged = armed !== this._mouseSuppressionArmed;
+        const heartbeatDue =
+            armed &&
+            now - this._mouseSuppressionLastSignal >=
+                MOUSE_SUPPRESSION_HEARTBEAT_US;
+
+        if (stateChanged || heartbeatDue) {
+            this._sendMouseSuppressionState(armed);
+            this._mouseSuppressionLastSignal = now;
+        }
+
+        this._mouseSuppressionArmed = armed;
+
+        if (enabled)
+            this._sendMouseConfiguration(false);
+    }
+
     _updateSuppressionState() {
+        let result = GLib.SOURCE_CONTINUE;
+
         if (!this._touchpadEnabled()) {
             if (this._suppressionArmed !== false)
                 this._sendSuppressionState(false);
 
             this._suppressionArmed = false;
-            return GLib.SOURCE_CONTINUE;
+        } else {
+            result = super._updateSuppressionState();
+
+            if (this._suppressionArmed)
+                this._sendBackendConfiguration(false);
         }
 
-        const result = super._updateSuppressionState();
-
-        if (this._suppressionArmed)
-            this._sendBackendConfiguration(false);
-
+        this._updateMouseButtonState();
         return result;
     }
 
@@ -286,10 +423,12 @@ export default class WhooshExtension extends WhooshCoreExtension {
 
         if (mouseScroll) {
             const [, source, direction] = mouseScroll;
-            this._mouse?.handleDirection(
-                direction,
-                source === 'openlogi'
-            );
+            if (this._mouseEnabled()) {
+                this._mouse?.handleDirection(
+                    direction,
+                    source === 'openlogi'
+                );
+            }
             return;
         }
 
@@ -387,9 +526,6 @@ export default class WhooshExtension extends WhooshCoreExtension {
     }
 
     _isInMouseGestureZone(win, px, py) {
-        if (!this._mouseEnabled())
-            return false;
-
         return super._isInGestureZone(win, px, py);
     }
 
