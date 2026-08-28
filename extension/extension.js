@@ -9,6 +9,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import WhooshCoreExtension from './extension-core.js';
 import {FourFingerTouchController} from './fourfinger.js';
+import {MouseGestureController} from './mouse.js';
 
 const OBJECT_PATH = '/io/github/eshanagarwal05/Whoosh';
 const INTERFACE_NAME = 'io.github.eshanagarwal05.Whoosh';
@@ -24,6 +25,19 @@ export default class WhooshExtension extends WhooshCoreExtension {
         this._backendConfigLastSignal = 0;
         this._singleTouchPausedForMultitouch = false;
 
+        this._mouse = new MouseGestureController({
+            getWindowAt: (x, y) => this._getWindowUnderPointer(x, y),
+            isTitlebar: (win, x, y) =>
+                this._isInMouseGestureZone(win, x, y),
+            applyAction: (win, action) =>
+                this._applyMouseAction(win, action),
+            isEnabled: () => this._mouseEnabled(),
+            getButton: () => this._settings.get_string('mouse-button'),
+            getThreshold: () => this._mouseMovementThreshold(),
+            isCornerTilingEnabled: () => this._cornerTilingEnabled(),
+        });
+        this._mouse.enable();
+
         this._fourFingerTouch = new FourFingerTouchController({
             getWindowAt: (x, y) => this._getWindowUnderPointer(x, y),
             applyAction: (win, action) =>
@@ -38,6 +52,8 @@ export default class WhooshExtension extends WhooshCoreExtension {
             this._connectSettings();
             this._sendBackendConfiguration(true);
         } catch (error) {
+            this._mouse.disable();
+            this._mouse = null;
             this._fourFingerTouch.disable();
             this._fourFingerTouch = null;
             this._disconnectSettings();
@@ -51,6 +67,8 @@ export default class WhooshExtension extends WhooshCoreExtension {
 
         this._fourFingerTouch?.disable();
         this._fourFingerTouch = null;
+        this._mouse?.disable();
+        this._mouse = null;
         this._singleTouchPausedForMultitouch = false;
 
         super.disable();
@@ -67,6 +85,9 @@ export default class WhooshExtension extends WhooshCoreExtension {
         };
 
         connect('touchpad-enabled', () => this._onTouchpadSettingsChanged());
+        connect('mouse-enabled', () => this._resetMouseState());
+        connect('mouse-button', () => this._resetMouseState());
+        connect('mouse-sensitivity', () => this._resetMouseState());
         connect('touchscreen-enabled', () => this._resetTouchscreenState());
         connect(
             'four-finger-touchscreen-enabled',
@@ -104,6 +125,21 @@ export default class WhooshExtension extends WhooshCoreExtension {
 
     _touchscreenEnabled() {
         return this._settings?.get_boolean('touchscreen-enabled') ?? true;
+    }
+
+    _mouseEnabled() {
+        return this._settings?.get_boolean('mouse-enabled') ?? false;
+    }
+
+    _mouseMovementThreshold() {
+        switch (this._settings?.get_string('mouse-sensitivity')) {
+        case 'low':
+            return 96;
+        case 'high':
+            return 48;
+        default:
+            return 72;
+        }
     }
 
     _fourFingerTouchscreenEnabled() {
@@ -190,6 +226,10 @@ export default class WhooshExtension extends WhooshCoreExtension {
 
         if (!pausedForMultitouch)
             this._touchscreen.enable();
+    }
+
+    _resetMouseState() {
+        this._mouse?.reset();
     }
 
     _resetFourFingerTouchState() {
@@ -348,6 +388,13 @@ export default class WhooshExtension extends WhooshCoreExtension {
         return super._isInTouchGestureZone(win, px, py);
     }
 
+    _isInMouseGestureZone(win, px, py) {
+        if (!this._mouseEnabled())
+            return false;
+
+        return super._isInTouchGestureZone(win, px, py);
+    }
+
     _applyTouchAction(win, action) {
         if (!this._touchscreenEnabled())
             return false;
@@ -361,6 +408,51 @@ export default class WhooshExtension extends WhooshCoreExtension {
         }
 
         return super._applyTouchAction(win, action);
+    }
+
+    _applyMouseAction(win, action) {
+        if (!this._mouseEnabled() || !win || win.is_hidden())
+            return false;
+
+        if (!this._cornerTilingEnabled() &&
+            (action === 'top-left' ||
+             action === 'top-right' ||
+             action === 'bottom-left' ||
+             action === 'bottom-right')) {
+            return false;
+        }
+
+        switch (action) {
+        case 'left':
+            this._tileHalf(win, 'left');
+            break;
+        case 'right':
+            this._tileHalf(win, 'right');
+            break;
+        case 'maximize':
+            this._maximize(win);
+            break;
+        case 'minimize':
+            this._minimize(win);
+            return true;
+        case 'top-left':
+            this._tileCorner(win, 'left', 'top');
+            break;
+        case 'top-right':
+            this._tileCorner(win, 'right', 'top');
+            break;
+        case 'bottom-left':
+            this._tileCorner(win, 'left', 'bottom');
+            break;
+        case 'bottom-right':
+            this._tileCorner(win, 'right', 'bottom');
+            break;
+        default:
+            return false;
+        }
+
+        this._activate(win, global.display.get_current_time());
+        return true;
     }
 
     _pauseSingleTouchController() {
