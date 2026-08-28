@@ -217,10 +217,20 @@ export class MouseScrollController {
     }
 
     _dispatchDirection(target, direction, now) {
-        if (this._isRepeatedAction(target, direction, now))
+        const tilingDirection = direction === 'left'
+            ? 'right'
+            : direction === 'right'
+                ? 'left'
+                : direction;
+
+        if (this._isRepeatedAction(target, tilingDirection, now))
             return;
 
-        const action = this._actionForDirection(target, direction, now);
+        const action = this._actionForDirection(
+            target,
+            tilingDirection,
+            now
+        );
 
         try {
             this._applyAction(target, action);
@@ -228,7 +238,11 @@ export class MouseScrollController {
             console.error(`Whoosh mouse gesture action failed: ${error}`);
         }
 
-        this._lastAction = {window: target, direction, when: now};
+        this._lastAction = {
+            window: target,
+            direction: tilingDirection,
+            when: now,
+        };
     }
 
     _isTouchpadEvent(event) {
