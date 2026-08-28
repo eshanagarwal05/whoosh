@@ -7,6 +7,7 @@
 import argparse
 import os
 import re
+import select
 import shutil
 import subprocess
 import sys
@@ -14,6 +15,7 @@ import threading
 import time
 
 import gi
+from evdev import InputDevice, ecodes, list_devices
 
 gi.require_version("Gio", "2.0")
 from gi.repository import Gio, GLib
@@ -24,6 +26,14 @@ INTERFACE_NAME = "io.github.eshanagarwal05.Whoosh"
 
 AXIS_DOMINANCE = 1.25
 SCROLL_STREAM_GAP = 0.18
+OPENLOGI_DEVICE_NAME = "OpenLogi action injector"
+IGNORED_MOUSE_DEVICE_NAMES = {
+    "Whoosh Virtual Touchpad",
+}
+MOUSE_SCROLL_AXES = {
+    ecodes.REL_WHEEL,
+    ecodes.REL_HWHEEL,
+}
 
 SENSITIVITY_PRESETS = {
     "low": {
@@ -306,6 +316,124 @@ class GestureRecognizer:
                 self.emit("pinch_out")
 
 
+class MouseScrollMonitor:
+    def __init__(self, recognizer):
+        self.recognizer = recognizer
+        self.devices = {}
+        self.skipped_paths = set()
+
+    def log(self, message):
+        self.recognizer.log(f"mouse monitor {message}")
+
+    def _discover_devices(self):
+        current_paths = set(list_devices())
+
+        for fd, device in list(self.devices.items()):
+            if device.path not in current_paths:
+                self._remove_device(fd)
+
+        self.skipped_paths.intersection_update(current_paths)
+        known_paths = {device.path for device in self.devices.values()}
+
+        for path in current_paths:
+            if path in known_paths or path in self.skipped_paths:
+                continue
+
+            try:
+                device = InputDevice(path)
+                relative_axes = set(
+                    device.capabilities().get(ecodes.EV_REL, [])
+                )
+            except OSError:
+                continue
+
+            if (
+                device.name in IGNORED_MOUSE_DEVICE_NAMES
+                or "touchpad" in device.name.lower()
+                or not relative_axes.intersection(MOUSE_SCROLL_AXES)
+            ):
+                self.skipped_paths.add(path)
+                device.close()
+                continue
+
+            self.devices[device.fd] = device
+            self.log(f"watching {device.name!r} ({path})")
+
+    def _remove_device(self, fd):
+        device = self.devices.pop(fd, None)
+        if device is None:
+            return
+
+        self.log(f"stopped watching {device.name!r}")
+        try:
+            device.close()
+        except OSError:
+            pass
+
+    def _emit_scroll(self, device, event):
+        if event.type != ecodes.EV_REL or event.value == 0:
+            return
+
+        if event.code == ecodes.REL_WHEEL:
+            direction = "up" if event.value > 0 else "down"
+        elif event.code == ecodes.REL_HWHEEL:
+            direction = "right" if event.value > 0 else "left"
+        else:
+            return
+
+        source = (
+            "openlogi"
+            if device.name == OPENLOGI_DEVICE_NAME
+            else "mouse"
+        )
+        self.recognizer.emit(f"{source}_scroll_{direction}")
+
+    def run(self):
+        while True:
+            self._discover_devices()
+
+            if not self.devices:
+                time.sleep(1.0)
+                continue
+
+            try:
+                readable, _, _ = select.select(
+                    list(self.devices),
+                    [],
+                    [],
+                    1.0,
+                )
+            except (OSError, ValueError):
+                for fd, device in list(self.devices.items()):
+                    if not os.path.exists(device.path):
+                        self._remove_device(fd)
+                continue
+
+            for fd in readable:
+                device = self.devices.get(fd)
+                if device is None:
+                    continue
+
+                try:
+                    for event in device.read():
+                        self._emit_scroll(device, event)
+                except BlockingIOError:
+                    continue
+                except OSError:
+                    self._remove_device(fd)
+
+
+def start_mouse_scroll_monitor(recognizer):
+    monitor = MouseScrollMonitor(recognizer)
+    thread = threading.Thread(
+        target=monitor.run,
+        daemon=True,
+        name="whoosh-mouse-scroll",
+    )
+    thread.start()
+    return thread
+
+
 def _proxy_action_reader(recognizer):
     for line in sys.stdin:
         raw = line.strip()
@@ -363,6 +491,7 @@ def main():
 
     bus = connect_system_bus()
     recognizer = GestureRecognizer(bus, verbose=not args.quiet)
+    start_mouse_scroll_monitor(recognizer)
 
     if args.proxy_actions_stdin:
         start_proxy_action_reader(recognizer)
