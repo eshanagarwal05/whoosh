@@ -426,7 +426,8 @@ export default class WhooshExtension extends WhooshCoreExtension {
             if (this._mouseEnabled()) {
                 this._mouse?.handleDirection(
                     direction,
-                    source === 'openlogi'
+                    source === 'openlogi',
+                    true
                 );
             }
             return;
