@@ -25,16 +25,20 @@ the window to that half, scroll up maximizes it, and scroll down minimizes it.
 Horizontal followed quickly by vertical scroll performs the corresponding
 corner tile when corner tiling is enabled.
 
-The ends of the title bar remain native so window-control buttons continue to
-work. Mouse scroll gestures are disabled by default, and touchpad scroll events
+Mouse scroll gestures are disabled by default, and touchpad scroll events
 continue through the existing touchpad gesture path.
 
-For OpenLogi on Linux, promote **Forward** to gesture mode and map its four
-directions to **Scroll Left**, **Scroll Right**, **Scroll Up**, and **Scroll
-Down**. Start the held gesture anywhere over the title bar. Whoosh
-recognizes OpenLogi's `OpenLogi action injector` device and remembers that
-starting window briefly, so the cursor movement used to commit an OpenLogi
-gesture does not lose the target.
+Enable **Mouse Button Gestures**, select a physical button, then hold that button
+anywhere over a title bar and move the pointer. Left/right movement tiles,
+up/down maximizes or minimizes, and a horizontal movement followed by a vertical
+turn performs corner tiling. Sensitivity can be adjusted independently from the
+touchpad.
+
+The selected button is reserved while the pointer is over a title bar, so its
+normal action does not also fire. Outside title bars it passes through normally.
+Whoosh performs this selective reservation through its dedicated mouse proxy.
+Disable OpenLogi or other software that exclusively grabs the same physical
+mouse before enabling native Whoosh button gestures.
 
 ### Touchscreen controls
 
@@ -87,11 +91,12 @@ average distance of the four touch points from their centroid, which separates
 an inward/outward pinch from ordinary four-finger translation.
 
 The privileged Whoosh backend observes kernel mouse-wheel events and sends only
-their direction to the GNOME Shell extension over D-Bus. This is necessary
-because GNOME Shell does not expose mouse events delivered directly to normal
-application windows. The extension polls the pointer only while mouse gestures
-are enabled, targets the title-bar window, and leaves scrolling outside that
-zone unchanged.
+their direction to the GNOME Shell extension over D-Bus. A separate mouse proxy
+reserves the configured button only when the extension reports that the pointer
+is over a title bar, forwards all other input through a virtual mouse, and emits
+recognized movement directions over D-Bus. This is necessary because GNOME
+Shell does not expose mouse events delivered directly to normal application
+windows.
 
 Half and quarter tiling keep Mutter's `move_resize_frame()` call as the source
 of truth and add a compositor-only visual overlay inspired by GNOME Shell's
@@ -175,20 +180,22 @@ cd backend
 cd ..
 ```
 
-The installer copies the backend and input proxy into `/usr/local/libexec`,
-installs the system D-Bus policy and systemd service, enables the service, and
-starts it immediately.
+The installer copies the backend, touchpad proxy, and reserved-button mouse
+proxy into `/usr/local/libexec`, installs their system D-Bus policy and systemd
+services, enables both services, and starts them immediately.
 
 Verify that the backend is running:
 
 ```bash
 systemctl status whoosh-backend.service
+systemctl status whoosh-mouse-proxy.service
 ```
 
 For recent logs:
 
 ```bash
 journalctl -u whoosh-backend.service -b --no-pager
+journalctl -u whoosh-mouse-proxy.service -b --no-pager
 ```
 
 ### 4. Build the GNOME extension
@@ -234,6 +241,7 @@ The current preferences include:
 
 - touchpad gestures
 - mouse scroll gestures
+- mouse button gestures, gesture button, and sensitivity
 - touchscreen title-bar gestures
 - four-finger touchscreen gestures
 - GNOME Overview gestures
