@@ -229,20 +229,10 @@ export class MouseScrollController {
     }
 
     _dispatchDirection(target, direction, now) {
-        const tilingDirection = direction === 'left'
-            ? 'right'
-            : direction === 'right'
-                ? 'left'
-                : direction;
-
-        if (this._isRepeatedAction(target, tilingDirection, now))
+        if (this._isRepeatedAction(target, direction, now))
             return;
 
-        const action = this._actionForDirection(
-            target,
-            tilingDirection,
-            now
-        );
+        const action = this._actionForDirection(target, direction, now);
 
         try {
             this._applyAction(target, action);
@@ -252,7 +242,7 @@ export class MouseScrollController {
 
         this._lastAction = {
             window: target,
-            direction: tilingDirection,
+            direction,
             when: now,
         };
     }
@@ -292,8 +282,9 @@ export class MouseScrollController {
         if (pending.count < HORIZONTAL_SCROLL_STEPS)
             return false;
 
+        const tilingDirection = direction === 'left' ? 'right' : 'left';
         this._horizontalScrollPending = null;
-        this._dispatchDirection(target, direction, now);
+        this._dispatchDirection(target, tilingDirection, now);
         this._horizontalScrollGuard = {window: target, when: now};
         return true;
     }
