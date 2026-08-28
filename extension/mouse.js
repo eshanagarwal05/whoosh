@@ -5,7 +5,7 @@ import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
 
 const OPENLOGI_DEVICE_NAME = 'OpenLogi action injector';
-const OPENLOGI_TITLEBAR_GRACE_US = 750_000;
+const RECENT_TITLEBAR_GRACE_US = 750_000;
 const POINTER_POLL_MS = 30;
 const REPEAT_GUARD_US = 120_000;
 const SMOOTH_SCROLL_THRESHOLD = 1;
@@ -17,6 +17,7 @@ export class MouseScrollController {
         isTitlebar,
         applyAction,
         isEnabled,
+        isScrollEnabled,
         isCornerTilingEnabled,
         getCornerChainUs,
     }) {
@@ -24,6 +25,7 @@ export class MouseScrollController {
         this._isTitlebar = isTitlebar;
         this._applyAction = applyAction;
         this._isEnabled = isEnabled;
+        this._isScrollEnabled = isScrollEnabled;
         this._isCornerTilingEnabled = isCornerTilingEnabled;
         this._getCornerChainUs = getCornerChainUs;
 
@@ -89,7 +91,7 @@ export class MouseScrollController {
                 : -1;
 
             console.log(
-                `Whoosh mouse scroll ignored direction=${direction} ` +
+                `Whoosh mouse gesture ignored direction=${direction} ` +
                 `pointer=${Math.round(x)},${Math.round(y)} ` +
                 `window=${Boolean(pointerWindow)} ` +
                 `titlebar=${inTitlebar} recentAgeUs=${recentAge} ` +
@@ -100,14 +102,14 @@ export class MouseScrollController {
 
         this._dispatchDirection(target, direction, now);
         console.log(
-            `Whoosh mouse scroll handled direction=${direction} ` +
+            `Whoosh mouse gesture handled direction=${direction} ` +
             `recent=${allowRecentTarget}`
         );
         return true;
     }
 
     _handleCapturedEvent(event) {
-        if (!this._isEnabled())
+        if (!this._isScrollEnabled())
             return Clutter.EVENT_PROPAGATE;
 
         const type = event.type();
@@ -205,7 +207,7 @@ export class MouseScrollController {
             return null;
 
         const recent = this._recentTitlebarTarget;
-        if (now - recent.when > OPENLOGI_TITLEBAR_GRACE_US ||
+        if (now - recent.when > RECENT_TITLEBAR_GRACE_US ||
             !recent.window || recent.window.is_hidden()) {
             this._recentTitlebarTarget = null;
             return null;
@@ -223,7 +225,7 @@ export class MouseScrollController {
         try {
             this._applyAction(target, action);
         } catch (error) {
-            console.error(`Whoosh mouse scroll action failed: ${error}`);
+            console.error(`Whoosh mouse gesture action failed: ${error}`);
         }
 
         this._lastAction = {window: target, direction, when: now};
