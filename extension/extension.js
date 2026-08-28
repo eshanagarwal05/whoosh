@@ -128,22 +128,6 @@ export default class WhooshExtension extends WhooshCoreExtension {
         return this._settings?.get_boolean('mouse-enabled') ?? false;
     }
 
-    _handleAction(action) {
-        const mouseScroll =
-            /^(mouse|openlogi)_scroll_(left|right|up|down)$/.exec(action);
-
-        if (mouseScroll) {
-            const [, source, direction] = mouseScroll;
-            this._mouse?.handleDirection(
-                direction,
-                source === 'openlogi'
-            );
-            return;
-        }
-
-        super._handleAction(action);
-    }
-
     _fourFingerTouchscreenEnabled() {
         return this._settings?.get_boolean(
             'four-finger-touchscreen-enabled'
@@ -297,6 +281,18 @@ export default class WhooshExtension extends WhooshCoreExtension {
     }
 
     _handleAction(action) {
+        const mouseScroll =
+            /^(mouse|openlogi)_scroll_(left|right|up|down)$/.exec(action);
+
+        if (mouseScroll) {
+            const [, source, direction] = mouseScroll;
+            this._mouse?.handleDirection(
+                direction,
+                source === 'openlogi'
+            );
+            return;
+        }
+
         if (!this._touchpadEnabled())
             return;
 
