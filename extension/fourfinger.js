@@ -8,6 +8,7 @@ const TOUCH_COUNT = 4;
 const PINCH_IN_SCALE = 0.72;
 const PINCH_OUT_SCALE = 1.28;
 const MIN_INITIAL_SPREAD = 24;
+const SINGLE_TOUCH_STALE_MS = 500;
 const MULTITOUCH_STALE_MS = 2000;
 
 export class FourFingerTouchController {
@@ -106,7 +107,7 @@ export class FourFingerTouchController {
             this._cancelStaleWatchdog();
             this._finishGesture();
             this._endMultitouch();
-        } else if (this._multitouchActive) {
+        } else {
             this._refreshStaleWatchdog();
         }
 
@@ -116,13 +117,17 @@ export class FourFingerTouchController {
     _refreshStaleWatchdog() {
         this._cancelStaleWatchdog();
 
+        const timeoutMs = this._multitouchActive
+            ? MULTITOUCH_STALE_MS
+            : SINGLE_TOUCH_STALE_MS;
+
         this._staleWatchdogSource = GLib.timeout_add(
             GLib.PRIORITY_DEFAULT,
-            MULTITOUCH_STALE_MS,
+            timeoutMs,
             () => {
                 this._staleWatchdogSource = 0;
 
-                if (!this._multitouchActive)
+                if (this._points.size === 0)
                     return GLib.SOURCE_REMOVE;
 
                 if (this._gesture)
