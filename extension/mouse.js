@@ -7,11 +7,11 @@ const DIRECTION_DOMINANCE = 1.15;
 const CORNER_THRESHOLD_RATIO = 0.85;
 
 const BUTTON_NUMBERS = {
-    primary: 1,
-    middle: 2,
-    secondary: 3,
-    back: 8,
-    forward: 9,
+    primary: [1],
+    middle: [2],
+    secondary: [3],
+    back: [8, 11],
+    forward: [9, 10],
 };
 
 export class MouseGestureController {
@@ -83,8 +83,10 @@ export class MouseGestureController {
         if (this._session || !this._isEnabled())
             return Clutter.EVENT_PROPAGATE;
 
-        const button = BUTTON_NUMBERS[this._getButton()] ?? 2;
-        if (event.get_button() !== button)
+        const buttons = BUTTON_NUMBERS[this._getButton()] ?? [2];
+        const button = event.get_button();
+
+        if (!buttons.includes(button))
             return Clutter.EVENT_PROPAGATE;
 
         const [x, y] = event.get_coords();
