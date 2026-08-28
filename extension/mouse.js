@@ -6,6 +6,7 @@ import GLib from 'gi://GLib';
 
 const OPENLOGI_DEVICE_NAME = 'OpenLogi action injector';
 const OPENLOGI_TITLEBAR_GRACE_US = 750_000;
+const POINTER_POLL_MS = 30;
 const REPEAT_GUARD_US = 120_000;
 const SMOOTH_SCROLL_THRESHOLD = 1;
 const DIRECTION_DOMINANCE = 1.15;
@@ -27,6 +28,7 @@ export class MouseScrollController {
         this._getCornerChainUs = getCornerChainUs;
 
         this._capturedEventId = 0;
+        this._pointerPollId = 0;
         this.reset();
     }
 
@@ -38,12 +40,22 @@ export class MouseScrollController {
             'captured-event',
             (_actor, event) => this._handleCapturedEvent(event)
         );
+        this._pointerPollId = GLib.timeout_add(
+            GLib.PRIORITY_DEFAULT,
+            POINTER_POLL_MS,
+            () => this._pollPointer()
+        );
     }
 
     disable() {
         if (this._capturedEventId) {
             global.stage.disconnect(this._capturedEventId);
             this._capturedEventId = 0;
+        }
+
+        if (this._pointerPollId) {
+            GLib.source_remove(this._pointerPollId);
+            this._pointerPollId = 0;
         }
 
         this.reset();
@@ -56,6 +68,21 @@ export class MouseScrollController {
         this._smoothTarget = null;
         this._smoothX = 0;
         this._smoothY = 0;
+    }
+
+    handleDirection(direction, allowRecentTarget = false) {
+        if (!this._isEnabled())
+            return false;
+
+        const now = GLib.get_monotonic_time();
+        const target = this._targetAtPointer(now) ??
+            (allowRecentTarget ? this._recentTarget(now) : null);
+
+        if (!target)
+            return false;
+
+        this._dispatchDirection(target, direction, now);
+        return true;
     }
 
     _handleCapturedEvent(event) {
@@ -94,23 +121,25 @@ export class MouseScrollController {
         if (!direction)
             return Clutter.EVENT_STOP;
 
-        if (this._isRepeatedAction(target, direction, now))
-            return Clutter.EVENT_STOP;
+        this._dispatchDirection(target, direction, now);
+        return Clutter.EVENT_STOP;
+    }
 
-        const action = this._actionForDirection(target, direction, now);
-
-        try {
-            this._applyAction(target, action);
-        } catch (error) {
-            console.error(`Whoosh mouse scroll action failed: ${error}`);
+    _pollPointer() {
+        if (this._isEnabled()) {
+            const [x, y] = global.get_pointer();
+            this._rememberTitlebarAt(x, y, GLib.get_monotonic_time());
         }
 
-        this._lastAction = {window: target, direction, when: now};
-        return Clutter.EVENT_STOP;
+        return GLib.SOURCE_CONTINUE;
     }
 
     _rememberTitlebarTarget(event) {
         const [x, y] = event.get_coords();
+        this._rememberTitlebarAt(x, y, GLib.get_monotonic_time());
+    }
+
+    _rememberTitlebarAt(x, y, now) {
         const win = this._getWindowAt(x, y);
 
         if (!win || !this._isTitlebar(win, x, y))
@@ -118,12 +147,28 @@ export class MouseScrollController {
 
         this._recentTitlebarTarget = {
             window: win,
-            when: GLib.get_monotonic_time(),
+            when: now,
         };
     }
 
     _targetForScroll(event, now) {
         const [x, y] = event.get_coords();
+        const target = this._targetAt(x, y, now);
+
+        if (target)
+            return target;
+
+        return this._isOpenLogiEvent(event)
+            ? this._recentTarget(now)
+            : null;
+    }
+
+    _targetAtPointer(now) {
+        const [x, y] = global.get_pointer();
+        return this._targetAt(x, y, now);
+    }
+
+    _targetAt(x, y, now) {
         const win = this._getWindowAt(x, y);
 
         if (win && this._isTitlebar(win, x, y)) {
@@ -131,7 +176,11 @@ export class MouseScrollController {
             return win;
         }
 
-        if (!this._isOpenLogiEvent(event) || !this._recentTitlebarTarget)
+        return null;
+    }
+
+    _recentTarget(now) {
+        if (!this._recentTitlebarTarget)
             return null;
 
         const recent = this._recentTitlebarTarget;
@@ -142,6 +191,21 @@ export class MouseScrollController {
         }
 
         return recent.window;
+    }
+
+    _dispatchDirection(target, direction, now) {
+        if (this._isRepeatedAction(target, direction, now))
+            return;
+
+        const action = this._actionForDirection(target, direction, now);
+
+        try {
+            this._applyAction(target, action);
+        } catch (error) {
+            console.error(`Whoosh mouse scroll action failed: ${error}`);
+        }
+
+        this._lastAction = {window: target, direction, when: now};
     }
 
     _isTouchpadEvent(event) {
