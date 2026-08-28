@@ -6,6 +6,33 @@
       <summary>Enable touchpad gestures</summary>
       <description>Allow Whoosh to respond to supported two-finger swipe and pinch gestures.</description>
     </key>
+    <key name="mouse-enabled" type="b">
+      <default>false</default>
+      <summary>Enable mouse gestures</summary>
+      <description>Allow a configured mouse button and pointer movement over a window title bar to trigger Whoosh actions.</description>
+    </key>
+    <key name="mouse-button" type="s">
+      <choices>
+        <choice value="primary"/>
+        <choice value="middle"/>
+        <choice value="secondary"/>
+        <choice value="back"/>
+        <choice value="forward"/>
+      </choices>
+      <default>'middle'</default>
+      <summary>Mouse gesture button</summary>
+      <description>Selects the mouse button reserved for Whoosh gestures in the center of window title bars.</description>
+    </key>
+    <key name="mouse-sensitivity" type="s">
+      <choices>
+        <choice value="low"/>
+        <choice value="normal"/>
+        <choice value="high"/>
+      </choices>
+      <default>'normal'</default>
+      <summary>Mouse gesture sensitivity</summary>
+      <description>Controls how far the pointer must move before Whoosh recognizes a mouse gesture.</description>
+    </key>
     <key name="touchscreen-enabled" type="b">
       <default>true</default>
       <summary>Enable touchscreen title-bar gestures</summary>
