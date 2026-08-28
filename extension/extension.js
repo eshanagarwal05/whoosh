@@ -9,7 +9,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import WhooshCoreExtension from './extension-core.js';
 import {FourFingerTouchController} from './fourfinger.js';
-import {MouseGestureController} from './mouse.js';
+import {MouseScrollController} from './mouse.js';
 
 const OBJECT_PATH = '/io/github/eshanagarwal05/Whoosh';
 const INTERFACE_NAME = 'io.github.eshanagarwal05.Whoosh';
@@ -25,16 +25,15 @@ export default class WhooshExtension extends WhooshCoreExtension {
         this._backendConfigLastSignal = 0;
         this._singleTouchPausedForMultitouch = false;
 
-        this._mouse = new MouseGestureController({
+        this._mouse = new MouseScrollController({
             getWindowAt: (x, y) => this._getWindowUnderPointer(x, y),
             isTitlebar: (win, x, y) =>
                 this._isInMouseGestureZone(win, x, y),
             applyAction: (win, action) =>
                 this._applyMouseAction(win, action),
             isEnabled: () => this._mouseEnabled(),
-            getButton: () => this._settings.get_string('mouse-button'),
-            getThreshold: () => this._mouseMovementThreshold(),
             isCornerTilingEnabled: () => this._cornerTilingEnabled(),
+            getCornerChainUs: () => this._cornerChainUs(),
         });
         this._mouse.enable();
 
@@ -86,8 +85,6 @@ export default class WhooshExtension extends WhooshCoreExtension {
 
         connect('touchpad-enabled', () => this._onTouchpadSettingsChanged());
         connect('mouse-enabled', () => this._resetMouseState());
-        connect('mouse-button', () => this._resetMouseState());
-        connect('mouse-sensitivity', () => this._resetMouseState());
         connect('touchscreen-enabled', () => this._resetTouchscreenState());
         connect(
             'four-finger-touchscreen-enabled',
@@ -129,17 +126,6 @@ export default class WhooshExtension extends WhooshCoreExtension {
 
     _mouseEnabled() {
         return this._settings?.get_boolean('mouse-enabled') ?? false;
-    }
-
-    _mouseMovementThreshold() {
-        switch (this._settings?.get_string('mouse-sensitivity')) {
-        case 'low':
-            return 96;
-        case 'high':
-            return 48;
-        default:
-            return 72;
-        }
     }
 
     _fourFingerTouchscreenEnabled() {
