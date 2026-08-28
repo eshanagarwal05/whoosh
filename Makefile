@@ -17,7 +17,7 @@ check:
 extension-zip: check
 	mkdir -p dist
 	glib-compile-schemas --strict $(SCHEMA_DIR)
-	cd extension && zip -9 -r ../dist/$(UUID).zip extension.js extension-core.js touchscreen.js fourfinger.js mouse.js prefs.js metadata.json schemas
+	cd extension && zip -9 -r ../dist/$(UUID).zip extension.js extension-main.js extension-core.js touchscreen.js fourfinger.js mouse.js prefs.js metadata.json schemas
 
 clean:
 	rm -f dist/$(UUID).zip
