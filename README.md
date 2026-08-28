@@ -19,21 +19,22 @@ Whoosh brings touchpad, mouse, and touchscreen window gestures to GNOME Shell 50
 
 ### Mouse controls
 
-Enable mouse gestures in Whoosh Settings, choose a mouse button, then hold that
-button over the center of a window title bar and move the pointer. Left, right,
-up, down, and chained corner movements perform the same window actions shown in
-the table above. Mouse gestures default to the middle button and can use the
-primary, middle, secondary, back, or forward button.
+Enable **Mouse Scroll Gestures** in Whoosh Settings, place the pointer over the
+center of a window title bar, and scroll in a direction. Scroll left/right tiles
+the window to that half, scroll up maximizes it, and scroll down minimizes it.
+Horizontal followed quickly by vertical scroll performs the corresponding
+corner tile when corner tiling is enabled.
 
-The selected button is reserved for Whoosh while the pointer is in the mouse
-gesture zone. The ends of the title bar remain native so window-control buttons
-continue to work. Mouse gestures are disabled by default.
+The ends of the title bar remain native so window-control buttons continue to
+work. Mouse scroll gestures are disabled by default, and touchpad scroll events
+continue through the existing touchpad gesture path.
 
-When using OpenLogi on Linux, configure a selected side button as its native
-mouse action (`MouseBack` or `MouseForward`). Whoosh accepts both Linux event
-code variants for each side button, so OpenLogi can keep its input hook enabled.
-An OpenLogi button promoted to gesture mode is consumed by OpenLogi and cannot
-also begin Whoosh's own mouse gesture recognizer.
+For OpenLogi on Linux, promote **Forward** to gesture mode and map its four
+directions to **Scroll Left**, **Scroll Right**, **Scroll Up**, and **Scroll
+Down**. Start the held gesture over the center of the title bar. Whoosh
+recognizes OpenLogi's `OpenLogi action injector` device and remembers that
+starting window briefly, so the cursor movement used to commit an OpenLogi
+gesture does not lose the target.
 
 ### Touchscreen controls
 
@@ -85,9 +86,9 @@ extension from Clutter touch sequences. Their scale is calculated from the
 average distance of the four touch points from their centroid, which separates
 an inward/outward pinch from ordinary four-finger translation.
 
-Mouse gestures are also recognized inside the GNOME Shell extension. Because
-they do not use the privileged touchpad proxy, enabling mouse gestures does not
-change ordinary pointer input outside the title-bar gesture zone.
+Mouse scroll gestures are recognized inside the GNOME Shell extension. Because
+they do not use the privileged touchpad proxy, enabling them does not change
+ordinary pointer input outside the title-bar gesture zone.
 
 Half and quarter tiling keep Mutter's `move_resize_frame()` call as the source
 of truth and add a compositor-only visual overlay inspired by GNOME Shell's
@@ -229,8 +230,7 @@ gnome-extensions prefs 'whoosh@eshanagarwal05.github.io'
 The current preferences include:
 
 - touchpad gestures
-- mouse gestures and gesture button
-- mouse sensitivity: Low, Normal, or High
+- mouse scroll gestures
 - touchscreen title-bar gestures
 - four-finger touchscreen gestures
 - GNOME Overview gestures
