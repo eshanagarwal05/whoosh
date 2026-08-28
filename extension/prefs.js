@@ -8,6 +8,18 @@ import Gtk from 'gi://Gtk';
 import {ExtensionPreferences} from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 
 const CHOICES = {
+    'mouse-button': [
+        ['primary', 'Left (Primary)'],
+        ['middle', 'Middle'],
+        ['secondary', 'Right (Secondary)'],
+        ['back', 'Back'],
+        ['forward', 'Forward'],
+    ],
+    'mouse-sensitivity': [
+        ['low', 'Low'],
+        ['normal', 'Normal'],
+        ['high', 'High'],
+    ],
     'touchpad-sensitivity': [
         ['low', 'Low'],
         ['normal', 'Normal'],
@@ -59,6 +71,29 @@ export default class WhooshPreferences extends ExtensionPreferences {
             'Scroll over a title bar to tile, maximize, or minimize its window'
         );
         inputGroup.add(mouseRow);
+
+        const mouseButtonEnabledRow = this._switchRow(
+            settings,
+            'mouse-button-enabled',
+            'Mouse Button Gestures',
+            'Hold a reserved mouse button and move over a title bar'
+        );
+        inputGroup.add(mouseButtonEnabledRow);
+
+        const mouseButtonRow = this._choiceRow(
+            settings,
+            'mouse-button',
+            'Gesture Button',
+            'Reserved by Whoosh over title bars; native everywhere else'
+        );
+        inputGroup.add(mouseButtonRow);
+
+        settings.bind(
+            'mouse-button-enabled',
+            mouseButtonRow,
+            'sensitive',
+            Gio.SettingsBindFlags.GET
+        );
 
         const touchscreenRow = this._switchRow(
             settings,
@@ -132,6 +167,21 @@ export default class WhooshPreferences extends ExtensionPreferences {
             'How much movement is required before a gesture is recognized'
         );
         behaviorGroup.add(sensitivityRow);
+
+        const mouseSensitivityRow = this._choiceRow(
+            settings,
+            'mouse-sensitivity',
+            'Mouse Button Sensitivity',
+            'How far the pointer moves before the gesture activates'
+        );
+        behaviorGroup.add(mouseSensitivityRow);
+
+        settings.bind(
+            'mouse-button-enabled',
+            mouseSensitivityRow,
+            'sensitive',
+            Gio.SettingsBindFlags.GET
+        );
 
         const cornerTimingRow = this._choiceRow(
             settings,
