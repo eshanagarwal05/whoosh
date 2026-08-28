@@ -21,7 +21,8 @@ Whoosh brings touchpad, mouse, and touchscreen window gestures to GNOME Shell 50
 
 Enable **Mouse Scroll Gestures** in Whoosh Settings, place the pointer anywhere
 over a window title bar, and scroll in a direction. Scroll left/right tiles
-the window to that half, scroll up maximizes it, and scroll down minimizes it.
+the window to the opposite half, scroll up maximizes it, and scroll down
+minimizes it.
 Horizontal followed quickly by vertical scroll performs the corresponding
 corner tile when corner tiling is enabled.
 
@@ -30,9 +31,9 @@ continue through the existing touchpad gesture path.
 
 Enable **Mouse Button Gestures**, select a physical button, then hold that button
 anywhere over a title bar and move the pointer. Left/right movement tiles,
-up/down maximizes or minimizes, and a horizontal movement followed by a vertical
-turn performs corner tiling. Sensitivity can be adjusted independently from the
-touchpad.
+respectively, to the opposite half; up/down maximizes or minimizes, and a
+horizontal movement followed by a vertical turn performs corner tiling.
+Sensitivity can be adjusted independently from the touchpad.
 
 The selected button is reserved while the pointer is over a title bar, so its
 normal action does not also fire. Outside title bars it passes through normally.
