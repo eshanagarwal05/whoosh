@@ -11,6 +11,33 @@
       <summary>Enable mouse scroll gestures</summary>
       <description>Allow mouse wheel events over a window title bar to trigger Whoosh actions.</description>
     </key>
+    <key name="mouse-button-enabled" type="b">
+      <default>false</default>
+      <summary>Enable reserved-button mouse gestures</summary>
+      <description>Reserve a selected physical mouse button over title bars and recognize pointer movement as Whoosh gestures.</description>
+    </key>
+    <key name="mouse-button" type="s">
+      <choices>
+        <choice value="primary"/>
+        <choice value="middle"/>
+        <choice value="secondary"/>
+        <choice value="back"/>
+        <choice value="forward"/>
+      </choices>
+      <default>'middle'</default>
+      <summary>Reserved mouse gesture button</summary>
+      <description>Selects the physical mouse button used for native Whoosh button-and-motion gestures.</description>
+    </key>
+    <key name="mouse-sensitivity" type="s">
+      <choices>
+        <choice value="low"/>
+        <choice value="normal"/>
+        <choice value="high"/>
+      </choices>
+      <default>'normal'</default>
+      <summary>Mouse button gesture sensitivity</summary>
+      <description>Controls how far the pointer must move before a reserved-button mouse gesture is recognized.</description>
+    </key>
     <key name="touchscreen-enabled" type="b">
       <default>true</default>
       <summary>Enable touchscreen title-bar gestures</summary>
