@@ -390,7 +390,7 @@ export default class WhooshExtension extends WhooshCoreExtension {
         if (!this._mouseEnabled())
             return false;
 
-        return super._isInTouchGestureZone(win, px, py);
+        return super._isInGestureZone(win, px, py);
     }
 
     _applyTouchAction(win, action) {
