@@ -19,8 +19,8 @@ Whoosh brings touchpad, mouse, and touchscreen window gestures to GNOME Shell 50
 
 ### Mouse controls
 
-Enable **Mouse Scroll Gestures** in Whoosh Settings, place the pointer over the
-center of a window title bar, and scroll in a direction. Scroll left/right tiles
+Enable **Mouse Scroll Gestures** in Whoosh Settings, place the pointer anywhere
+over a window title bar, and scroll in a direction. Scroll left/right tiles
 the window to that half, scroll up maximizes it, and scroll down minimizes it.
 Horizontal followed quickly by vertical scroll performs the corresponding
 corner tile when corner tiling is enabled.
@@ -31,7 +31,7 @@ continue through the existing touchpad gesture path.
 
 For OpenLogi on Linux, promote **Forward** to gesture mode and map its four
 directions to **Scroll Left**, **Scroll Right**, **Scroll Up**, and **Scroll
-Down**. Start the held gesture over the center of the title bar. Whoosh
+Down**. Start the held gesture anywhere over the title bar. Whoosh
 recognizes OpenLogi's `OpenLogi action injector` device and remembers that
 starting window briefly, so the cursor movement used to commit an OpenLogi
 gesture does not lose the target.
