@@ -216,6 +216,11 @@ class GestureRecognizer:
             "Gesture",
             GLib.Variant("(s)", (action,)),
         )
+        # Mouse actions can originate on the evdev monitor thread while the
+        # main thread is blocked reading libinput output. Force the queued
+        # broadcast onto the bus instead of waiting for a GLib main-context
+        # iteration that may not arrive until the next touchpad event.
+        self.bus.flush_sync(None)
         self.log(f"ACTION {action}")
 
     def handle_scroll(self, dx, dy):
