@@ -24,7 +24,9 @@ over a window title bar, and scroll in a direction. Scroll left/right tiles
 the window to the opposite half, scroll up maximizes it, and scroll down
 minimizes it.
 Horizontal followed quickly by vertical scroll performs the corresponding
-corner tile when corner tiling is enabled.
+corner tile when corner tiling is enabled. Horizontal tiling requires two
+matching inputs, then ignores the remainder of that scroll burst so a newly
+exposed window cannot be tiled accidentally.
 
 Mouse scroll gestures are disabled by default, and touchpad scroll events
 continue through the existing touchpad gesture path.
