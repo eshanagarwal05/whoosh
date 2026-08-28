@@ -32,10 +32,10 @@ Mouse scroll gestures are disabled by default, and touchpad scroll events
 continue through the existing touchpad gesture path.
 
 Enable **Mouse Button Gestures**, select a physical button, then hold that button
-anywhere over a title bar and move the pointer. Left/right movement tiles,
-respectively, to the opposite half; up/down maximizes or minimizes, and a
-horizontal movement followed by a vertical turn performs corner tiling.
-Sensitivity can be adjusted independently from the touchpad.
+anywhere over a title bar and move the pointer. Left/right movement tiles to the
+matching half; up/down maximizes or minimizes, and a horizontal movement
+followed by a vertical turn performs corner tiling. Sensitivity can be adjusted
+independently from the touchpad.
 
 The selected button is reserved while the pointer is over a title bar, so its
 normal action does not also fire. Outside title bars it passes through normally.
