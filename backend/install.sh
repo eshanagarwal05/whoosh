@@ -27,17 +27,26 @@ sudo install -m 0755 \
 sudo install -m 0755 \
     "$HERE/whoosh-input-proxy.py" \
     /usr/local/libexec/whoosh-input-proxy.py
+sudo install -m 0755 \
+    "$HERE/whoosh-mouse-proxy.py" \
+    /usr/local/libexec/whoosh-mouse-proxy.py
 
 sudo install -m 0644 \
     "$HERE/io.github.eshanagarwal05.Whoosh.conf" \
     /etc/dbus-1/system.d/io.github.eshanagarwal05.Whoosh.conf
+sudo systemctl reload dbus.service 2>/dev/null || true
 
 sudo install -m 0644 \
     "$HERE/whoosh-backend.service" \
     /etc/systemd/system/whoosh-backend.service
+sudo install -m 0644 \
+    "$HERE/whoosh-mouse-proxy.service" \
+    /etc/systemd/system/whoosh-mouse-proxy.service
 
 sudo systemctl daemon-reload
 sudo systemctl enable whoosh-backend.service
+sudo systemctl enable whoosh-mouse-proxy.service
 sudo systemctl restart whoosh-backend.service
+sudo systemctl restart whoosh-mouse-proxy.service
 
-echo "Whoosh proxy/backend installed and running."
+echo "Whoosh touchpad and mouse proxies installed and running."

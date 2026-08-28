@@ -1,6 +1,6 @@
 # Whoosh
 
-Whoosh brings two-finger touchpad gestures and touchscreen window controls to GNOME Shell 50.
+Whoosh brings touchpad, mouse, and touchscreen window gestures to GNOME Shell 50.
 
 ## Gestures
 
@@ -16,6 +16,32 @@ Whoosh brings two-finger touchpad gestures and touchscreen window controls to GN
 | Left → Down | Bottom-left quarter |
 | Right → Up | Top-right quarter |
 | Right → Down | Bottom-right quarter |
+
+### Mouse controls
+
+Enable **Mouse Scroll Gestures** in Whoosh Settings, place the pointer anywhere
+over a window title bar, and scroll in a direction. Scroll left/right tiles
+the window to the opposite half, scroll up maximizes it, and scroll down
+minimizes it.
+Horizontal followed quickly by vertical scroll performs the corresponding
+corner tile when corner tiling is enabled. Horizontal tiling requires two
+matching inputs, then ignores the remainder of that scroll burst so a newly
+exposed window cannot be tiled accidentally.
+
+Mouse scroll gestures are disabled by default, and touchpad scroll events
+continue through the existing touchpad gesture path.
+
+Enable **Mouse Button Gestures**, select a physical button, then hold that button
+anywhere over a title bar and move the pointer. Left/right movement tiles,
+respectively, to the opposite half; up/down maximizes or minimizes, and a
+horizontal movement followed by a vertical turn performs corner tiling.
+Sensitivity can be adjusted independently from the touchpad.
+
+The selected button is reserved while the pointer is over a title bar, so its
+normal action does not also fire. Outside title bars it passes through normally.
+Whoosh performs this selective reservation through its dedicated mouse proxy.
+Disable OpenLogi or other software that exclusively grabs the same physical
+mouse before enabling native Whoosh button gestures.
 
 ### Touchscreen controls
 
@@ -66,6 +92,14 @@ Four-finger touchscreen pinches are handled separately inside the GNOME Shell
 extension from Clutter touch sequences. Their scale is calculated from the
 average distance of the four touch points from their centroid, which separates
 an inward/outward pinch from ordinary four-finger translation.
+
+The privileged Whoosh backend observes kernel mouse-wheel events and sends only
+their direction to the GNOME Shell extension over D-Bus. A separate mouse proxy
+reserves the configured button only when the extension reports that the pointer
+is over a title bar, forwards all other input through a virtual mouse, and emits
+recognized movement directions over D-Bus. This is necessary because GNOME
+Shell does not expose mouse events delivered directly to normal application
+windows.
 
 Half and quarter tiling keep Mutter's `move_resize_frame()` call as the source
 of truth and add a compositor-only visual overlay inspired by GNOME Shell's
@@ -149,20 +183,22 @@ cd backend
 cd ..
 ```
 
-The installer copies the backend and input proxy into `/usr/local/libexec`,
-installs the system D-Bus policy and systemd service, enables the service, and
-starts it immediately.
+The installer copies the backend, touchpad proxy, and reserved-button mouse
+proxy into `/usr/local/libexec`, installs their system D-Bus policy and systemd
+services, enables both services, and starts them immediately.
 
 Verify that the backend is running:
 
 ```bash
 systemctl status whoosh-backend.service
+systemctl status whoosh-mouse-proxy.service
 ```
 
 For recent logs:
 
 ```bash
 journalctl -u whoosh-backend.service -b --no-pager
+journalctl -u whoosh-mouse-proxy.service -b --no-pager
 ```
 
 ### 4. Build the GNOME extension
@@ -207,6 +243,8 @@ gnome-extensions prefs 'whoosh@eshanagarwal05.github.io'
 The current preferences include:
 
 - touchpad gestures
+- mouse scroll gestures
+- mouse button gestures, gesture button, and sensitivity
 - touchscreen title-bar gestures
 - four-finger touchscreen gestures
 - GNOME Overview gestures
