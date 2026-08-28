@@ -1,6 +1,6 @@
 # Whoosh
 
-Whoosh brings two-finger touchpad gestures and touchscreen window controls to GNOME Shell 50.
+Whoosh brings touchpad, mouse, and touchscreen window gestures to GNOME Shell 50.
 
 ## Gestures
 
@@ -16,6 +16,18 @@ Whoosh brings two-finger touchpad gestures and touchscreen window controls to GN
 | Left → Down | Bottom-left quarter |
 | Right → Up | Top-right quarter |
 | Right → Down | Bottom-right quarter |
+
+### Mouse controls
+
+Enable mouse gestures in Whoosh Settings, choose a mouse button, then hold that
+button over the center of a window title bar and move the pointer. Left, right,
+up, down, and chained corner movements perform the same window actions shown in
+the table above. Mouse gestures default to the middle button and can use the
+primary, middle, secondary, back, or forward button.
+
+The selected button is reserved for Whoosh while the pointer is in the mouse
+gesture zone. The ends of the title bar remain native so window-control buttons
+continue to work. Mouse gestures are disabled by default.
 
 ### Touchscreen controls
 
@@ -66,6 +78,10 @@ Four-finger touchscreen pinches are handled separately inside the GNOME Shell
 extension from Clutter touch sequences. Their scale is calculated from the
 average distance of the four touch points from their centroid, which separates
 an inward/outward pinch from ordinary four-finger translation.
+
+Mouse gestures are also recognized inside the GNOME Shell extension. Because
+they do not use the privileged touchpad proxy, enabling mouse gestures does not
+change ordinary pointer input outside the title-bar gesture zone.
 
 Half and quarter tiling keep Mutter's `move_resize_frame()` call as the source
 of truth and add a compositor-only visual overlay inspired by GNOME Shell's
@@ -207,6 +223,8 @@ gnome-extensions prefs 'whoosh@eshanagarwal05.github.io'
 The current preferences include:
 
 - touchpad gestures
+- mouse gestures and gesture button
+- mouse sensitivity: Low, Normal, or High
 - touchscreen title-bar gestures
 - four-finger touchscreen gestures
 - GNOME Overview gestures
