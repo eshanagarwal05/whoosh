@@ -416,7 +416,14 @@ export default class WhooshExtension extends Extension {
             device?.get_device_type() ===
                 Clutter.InputDeviceType.TOUCHPAD_DEVICE;
 
-        return isTouchpad
+        if (!isTouchpad)
+            return Clutter.EVENT_PROPAGATE;
+
+        const [px, py] = global.get_pointer();
+        const overviewWin = this._getOverviewWindowUnderPointer(px, py);
+        const dashApp = this._getDashAppUnderPointer(px, py);
+
+        return overviewWin || dashApp
             ? Clutter.EVENT_STOP
             : Clutter.EVENT_PROPAGATE;
     }
