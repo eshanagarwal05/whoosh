@@ -31,6 +31,9 @@ export default class WhooshExtension extends WhooshCoreExtension {
         this._mouseSuppressionArmed = null;
         this._mouseButtonSignalId = 0;
         this._singleTouchPausedForMultitouch = false;
+        this._overviewShowingId = 0;
+        this._overviewHiddenId = 0;
+        this._overviewTouchscreenActive = Main.overview.visible;
 
         this._mouse = new MouseScrollController({
             getWindowAt: (x, y) => this._getWindowUnderPointer(x, y),
@@ -69,14 +72,22 @@ export default class WhooshExtension extends WhooshCoreExtension {
             onMultitouchBegin: () => this._pauseSingleTouchController(),
             onMultitouchEnd: () => this._resumeSingleTouchController(),
         });
-        this._fourFingerTouch.enable();
-
         try {
             super.enable();
+            this._overviewShowingId = Main.overview.connect(
+                'showing',
+                () => this._onTouchscreenOverviewShowing()
+            );
+            this._overviewHiddenId = Main.overview.connect(
+                'hidden',
+                () => this._onTouchscreenOverviewHidden()
+            );
+            this._resetFourFingerTouchState();
             this._connectSettings();
             this._sendBackendConfiguration(true);
             this._sendMouseConfiguration(true);
         } catch (error) {
+            this._disconnectTouchscreenOverviewSignals();
             if (this._mouseButtonSignalId) {
                 Gio.DBus.system.signal_unsubscribe(
                     this._mouseButtonSignalId
@@ -97,6 +108,7 @@ export default class WhooshExtension extends WhooshCoreExtension {
         this._sendMouseSuppressionState(false);
         this._sendMouseConfiguration(true, false);
         this._disconnectSettings();
+        this._disconnectTouchscreenOverviewSignals();
 
         if (this._mouseButtonSignalId) {
             Gio.DBus.system.signal_unsubscribe(this._mouseButtonSignalId);
@@ -269,7 +281,7 @@ export default class WhooshExtension extends WhooshCoreExtension {
 
         this._touchscreen.disable();
 
-        if (!pausedForMultitouch)
+        if (!pausedForMultitouch && !this._overviewTouchscreenActive)
             this._touchscreen.enable();
     }
 
@@ -284,12 +296,45 @@ export default class WhooshExtension extends WhooshCoreExtension {
         const singleTouchWasPaused = this._singleTouchPausedForMultitouch;
 
         this._fourFingerTouch.disable();
-        this._fourFingerTouch.enable();
         this._singleTouchPausedForMultitouch = false;
 
         if (singleTouchWasPaused && this._touchscreen) {
             this._touchscreen.disable();
-            this._touchscreen.enable();
+            if (!this._overviewTouchscreenActive)
+                this._touchscreen.enable();
+        }
+
+        if (this._fourFingerTouchscreenEnabled() &&
+            !this._overviewTouchscreenActive) {
+            this._fourFingerTouch.enable();
+        }
+    }
+
+    _onTouchscreenOverviewShowing() {
+        // GNOME may take ownership of a native three-finger swipe without
+        // delivering its final touch events to the four-finger recognizer.
+        this._overviewTouchscreenActive = true;
+        this._fourFingerTouch?.disable();
+        this._touchscreen?.disable();
+        this._singleTouchPausedForMultitouch = false;
+    }
+
+    _onTouchscreenOverviewHidden() {
+        this._overviewTouchscreenActive = false;
+        this._touchscreen?.disable();
+        this._touchscreen?.enable();
+        this._resetFourFingerTouchState();
+    }
+
+    _disconnectTouchscreenOverviewSignals() {
+        if (this._overviewShowingId) {
+            Main.overview.disconnect(this._overviewShowingId);
+            this._overviewShowingId = 0;
+        }
+
+        if (this._overviewHiddenId) {
+            Main.overview.disconnect(this._overviewHiddenId);
+            this._overviewHiddenId = 0;
         }
     }
 
@@ -598,6 +643,7 @@ export default class WhooshExtension extends WhooshCoreExtension {
 
     _pauseSingleTouchController() {
         if (!this._fourFingerTouchscreenEnabled() ||
+            this._overviewTouchscreenActive ||
             this._singleTouchPausedForMultitouch ||
             !this._touchscreen) {
             return;
@@ -611,7 +657,9 @@ export default class WhooshExtension extends WhooshCoreExtension {
         if (!this._singleTouchPausedForMultitouch || !this._touchscreen)
             return;
 
-        this._touchscreen.enable();
+        this._touchscreen.disable();
+        if (!this._overviewTouchscreenActive)
+            this._touchscreen.enable();
         this._singleTouchPausedForMultitouch = false;
     }
 
