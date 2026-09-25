@@ -106,7 +106,19 @@ export class FourFingerTouchController {
             this._cancelStaleWatchdog();
             this._finishGesture();
             this._endMultitouch();
-        } else if (this._multitouchActive) {
+        } else if (this._points.size < 2 && this._multitouchActive) {
+            // A native three-finger gesture may not deliver its last end
+            // event to us. Restore title-bar input as soon as it is safe.
+            this._endMultitouch();
+
+            if (this._gesture) {
+                // A four-finger action still waits for the final release.
+                this._refreshStaleWatchdog();
+            } else {
+                this._points.clear();
+                this._cancelStaleWatchdog();
+            }
+        } else if (this._multitouchActive || this._gesture) {
             this._refreshStaleWatchdog();
         }
 
@@ -122,7 +134,7 @@ export class FourFingerTouchController {
             () => {
                 this._staleWatchdogSource = 0;
 
-                if (!this._multitouchActive)
+                if (!this._multitouchActive && !this._gesture)
                     return GLib.SOURCE_REMOVE;
 
                 if (this._gesture)
