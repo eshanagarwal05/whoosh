@@ -436,6 +436,12 @@ export default class WhooshExtension extends WhooshCoreExtension {
         if (!this._touchpadEnabled())
             return;
 
+        if (/^(left|right|up|down)$/.test(action)) {
+            const [, , modifiers] = global.get_pointer();
+            if ((modifiers & Clutter.ModifierType.SHIFT_MASK) !== 0)
+                action = `shift_${action}`;
+        }
+
         if (!this._cornerTilingEnabled() && action.startsWith('corner_'))
             return;
 
