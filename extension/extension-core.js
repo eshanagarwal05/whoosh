@@ -1067,7 +1067,24 @@ export default class WhooshExtension extends Extension {
         const area = win.get_work_area_current_monitor();
         const quarterWidth = Math.floor(area.width / 4);
         const remainder = area.width - quarterWidth * 3;
-        const tileWidth = side === 'left' ? quarterWidth : remainder;
+        const desiredWidth =
+            side === 'left' ? quarterWidth : remainder;
+
+        let minWidth = 0;
+
+        try {
+            const [hasMinimum, windowMinWidth] = win.get_min_size();
+
+            if (hasMinimum)
+                minWidth = windowMinWidth;
+        } catch (_) {
+        }
+
+        const tileWidth = Math.min(
+            area.width,
+            Math.max(desiredWidth, minWidth)
+        );
+
         const tileX = side === 'left'
             ? area.x
             : area.x + area.width - tileWidth;
