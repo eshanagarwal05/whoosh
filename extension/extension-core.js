@@ -337,6 +337,34 @@ export default class WhooshExtension extends Extension {
             if (fromOverview)
                 Main.overview.hide();
             break;
+        case 'shift_left':
+            this._tileQuarter(win, 'left');
+            this._activate(win, time);
+            this._lastHorizontal = null;
+            if (fromOverview)
+                Main.overview.hide();
+            break;
+        case 'shift_right':
+            this._tileQuarter(win, 'right');
+            this._activate(win, time);
+            this._lastHorizontal = null;
+            if (fromOverview)
+                Main.overview.hide();
+            break;
+        case 'shift_up':
+            this._tileVerticalHalf(win, 'top');
+            this._activate(win, time);
+            this._lastHorizontal = null;
+            if (fromOverview)
+                Main.overview.hide();
+            break;
+        case 'shift_down':
+            this._tileVerticalHalf(win, 'bottom');
+            this._activate(win, time);
+            this._lastHorizontal = null;
+            if (fromOverview)
+                Main.overview.hide();
+            break;
         case 'up':
             this._maximize(win);
             this._activate(win, time);
@@ -1032,6 +1060,44 @@ export default class WhooshExtension extends Extension {
             area.y,
             tileWidth,
             area.height
+        );
+    }
+
+    _tileQuarter(win, side) {
+        const area = win.get_work_area_current_monitor();
+        const quarterWidth = Math.floor(area.width / 4);
+        const remainder = area.width - quarterWidth * 3;
+        const tileWidth = side === 'left' ? quarterWidth : remainder;
+        const tileX = side === 'left'
+            ? area.x
+            : area.x + area.width - tileWidth;
+
+        this._moveResizeAnimated(
+            win,
+            tileX,
+            area.y,
+            tileWidth,
+            area.height
+        );
+    }
+
+    _tileVerticalHalf(win, vertical) {
+        const area = win.get_work_area_current_monitor();
+        const topHeight = Math.floor(area.height / 2);
+        const bottomHeight = area.height - topHeight;
+        const tileY = vertical === 'top'
+            ? area.y
+            : area.y + topHeight;
+        const tileHeight = vertical === 'top'
+            ? topHeight
+            : bottomHeight;
+
+        this._moveResizeAnimated(
+            win,
+            area.x,
+            tileY,
+            area.width,
+            tileHeight
         );
     }
 
