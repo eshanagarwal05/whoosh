@@ -448,17 +448,24 @@ export default class WhooshExtension extends Extension {
             return Clutter.EVENT_PROPAGATE;
 
         const [px, py] = global.get_pointer();
-        const overviewWin = this._getOverviewWindowUnderPointer(px, py);
         const dashApp = this._getDashAppUnderPointer(px, py);
 
-        return overviewWin || dashApp
+        if (dashApp)
+            return Clutter.EVENT_STOP;
+
+        if (Main.overview.dash.showAppsButton.checked)
+            return Clutter.EVENT_PROPAGATE;
+
+        return this._getOverviewWindowUnderPointer(px, py)
             ? Clutter.EVENT_STOP
             : Clutter.EVENT_PROPAGATE;
     }
 
     _getOverviewWindowUnderPointer(px, py) {
-        if (!Main.overview.visible)
+        if (!Main.overview.visible ||
+            Main.overview.dash.showAppsButton.checked) {
             return null;
+        }
 
         let actor = global.stage.get_actor_at_pos(
             Clutter.PickMode.ALL,
@@ -979,7 +986,9 @@ export default class WhooshExtension extends Extension {
     _updateSuppressionState() {
         const [px, py] = global.get_pointer();
         const overviewWin = this._getOverviewWindowUnderPointer(px, py);
-        const win = this._getWindowUnderPointer(px, py);
+        const win = Main.overview.visible
+            ? null
+            : this._getWindowUnderPointer(px, py);
         const dashApp = this._getDashAppUnderPointer(px, py);
         const armed = Boolean(
             overviewWin ||
