@@ -3,6 +3,7 @@
 //
 
 import Clutter from 'gi://Clutter';
+import {TabTarget, startTabHelper, stopTabHelper} from './tab-target.js';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Shell from 'gi://Shell';
@@ -28,6 +29,11 @@ const INTERFACE_NAME = 'io.github.eshanagarwal05.Whoosh';
 
 export default class WhooshExtension extends Extension {
     enable() {
+        startTabHelper(this.path);
+        this._tabTargets = new Set();
+        this._tabFocusTimers = new Set();
+        this._tabKeyboard = null;
+        this._pinchTabTarget = null;
         this._lastHorizontal = null;
         this._scrollTarget = null;
         this._scrollOverviewTarget = null;
@@ -91,6 +97,9 @@ export default class WhooshExtension extends Extension {
     }
 
     disable() {
+        stopTabHelper();
+        this._cancelTabTargets();
+        this._tabKeyboard = null;
         this._touchscreen?.disable();
         this._touchscreen = null;
 
@@ -189,6 +198,7 @@ export default class WhooshExtension extends Extension {
         }
 
         if (action === 'pinch_begin') {
+            this._cancelTabTargets();
             const [px, py] = global.get_pointer();
 
             const overviewWin =
@@ -212,8 +222,16 @@ export default class WhooshExtension extends Extension {
             }
 
             const win = this._getWindowUnderPointer(px, py);
-            this._pinchTarget =
-                win && this._isInGestureZone(win, px, py) ? win : null;
+            this._pinchTarget = win;
+            this._pinchFullscreenAllowed = win && this._isInGestureZone(win, px, py);
+            if (this._pinchTarget) {
+                try {
+                    this._pinchTabTarget = new TabTarget(this.path, win, px, py, this._pinchFullscreenAllowed);
+                    this._tabTargets.add(this._pinchTabTarget);
+                } catch (error) {
+                    console.error(`Whoosh tab detection unavailable: ${error}`);
+                }
+            }
             return;
         }
 
@@ -254,17 +272,21 @@ export default class WhooshExtension extends Extension {
             }
 
             const win = this._pinchTarget;
+            const tab = this._pinchTabTarget;
             this._pinchTarget = null;
+            this._pinchTabTarget = null;
+            if (action === 'pinch_out')
+                this._cancelTabTargets();
 
             if (!win || win.is_hidden())
                 return;
 
             if (action === 'pinch_in') {
                 if (this._gestureClaimActive)
-                    this._queueClose(win);
+                    this._queueClose(win, tab);
                 else
-                    this._close(win, time);
-            } else {
+                    this._performPinchClose(win, tab, time);
+            } else if (this._pinchFullscreenAllowed) {
                 this._fullscreen(win);
                 this._activate(win, time);
             }
@@ -1435,16 +1457,17 @@ export default class WhooshExtension extends Extension {
         this._pendingClose = null;
     }
 
-    _queueClose(win) {
-        this._pendingClose = win;
+    _queueClose(win, tab = null) {
+        this._pendingClose = {win, tab};
     }
 
     _commitPendingClose() {
-        const win = this._pendingClose;
+        const pending = this._pendingClose;
         this._pendingClose = null;
 
-        if (!win)
+        if (!pending)
             return;
+        const {win, tab} = pending;
 
         this._pendingCloseTimeoutId = GLib.timeout_add_once(
             GLib.PRIORITY_DEFAULT,
@@ -1454,9 +1477,8 @@ export default class WhooshExtension extends Extension {
 
                 try {
                     if (!win.is_hidden()) {
-                        this._close(
-                            win,
-                            global.display.get_current_time()
+                        this._performPinchClose(
+                            win, tab, global.display.get_current_time()
                         );
                     }
                 } catch (error) {
@@ -1464,6 +1486,93 @@ export default class WhooshExtension extends Extension {
                 }
             }
         );
+    }
+
+    _performPinchClose(win, tab, time) {
+        // A failed lookup must never turn an ordinary content pinch into a close.
+        if (!tab)
+            return;
+        if (!tab.matchesWindow(win)) {
+            tab.cancel();
+            this._tabTargets.delete(tab);
+            return;
+        }
+        // Already-focused windows need no activation timer. Keep asynchronous
+        // focus confirmation only when we are switching to another window.
+        if (win.has_focus()) {
+            this._finishTabClose(win, tab);
+            return;
+        }
+        const rect = win.get_buffer_rect();
+        this._activate(win, time);
+        let attempts = 0;
+        const timer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 30, () => {
+            attempts++;
+            const current = win.get_buffer_rect();
+            if (win.is_hidden() || attempts > 20 ||
+                current.x !== rect.x || current.y !== rect.y ||
+                current.width !== rect.width || current.height !== rect.height) {
+                this._tabFocusTimers.delete(timer);
+                this._tabTargets.delete(tab);
+                tab.cancel();
+                return GLib.SOURCE_REMOVE;
+            }
+            if (!win.has_focus())
+                return GLib.SOURCE_CONTINUE;
+            this._tabFocusTimers.delete(timer);
+            this._finishTabClose(win, tab);
+            return GLib.SOURCE_REMOVE;
+        });
+        this._tabFocusTimers.add(timer);
+    }
+
+    _finishTabClose(win, tab) {
+        tab.close(outcome => {
+            this._tabTargets.delete(tab);
+            if (outcome === 'window' && tab.allowWindowClose && !win.is_hidden())
+                this._close(win, global.display.get_current_time());
+            else if (outcome === 'shortcut')
+                this._closeSelectedTab(win);
+            else if (outcome !== 'closed' && outcome !== 'window' && outcome !== 'ignored')
+                Main.notify('Whoosh', 'Tab detection is unavailable in this app. The window was left open.');
+        });
+    }
+
+    _closeSelectedTab(win) {
+        // Never let a delayed helper send Ctrl+W to a newly focused app.
+        if (!win.has_focus() || win.is_hidden())
+            return;
+        const [, , modifiers] = global.get_pointer();
+        const shortcutModifiers = Clutter.ModifierType.SHIFT_MASK |
+            Clutter.ModifierType.CONTROL_MASK | Clutter.ModifierType.MOD1_MASK |
+            Clutter.ModifierType.SUPER_MASK;
+        if (modifiers & shortcutModifiers)
+            return;
+        this._tabKeyboard ??= Clutter.get_default_backend().get_default_seat()
+            .create_virtual_device(Clutter.InputDeviceType.KEYBOARD_DEVICE);
+        const now = GLib.get_monotonic_time();
+        const shift = /ptyxis|gnome-terminal|kgx|konsole|xfce4-terminal|tilix/i.test(win.get_wm_class() ?? '');
+        try {
+            if (shift)
+                this._tabKeyboard.notify_keyval(now, Clutter.KEY_Shift_L, Clutter.KeyState.PRESSED);
+            this._tabKeyboard.notify_keyval(now, Clutter.KEY_Control_L, Clutter.KeyState.PRESSED);
+            this._tabKeyboard.notify_keyval(now, Clutter.KEY_w, Clutter.KeyState.PRESSED);
+        } finally {
+            this._tabKeyboard.notify_keyval(now, Clutter.KEY_w, Clutter.KeyState.RELEASED);
+            this._tabKeyboard.notify_keyval(now, Clutter.KEY_Control_L, Clutter.KeyState.RELEASED);
+            if (shift)
+                this._tabKeyboard.notify_keyval(now, Clutter.KEY_Shift_L, Clutter.KeyState.RELEASED);
+        }
+    }
+
+    _cancelTabTargets() {
+        for (const timer of this._tabFocusTimers ?? [])
+            GLib.source_remove(timer);
+        this._tabFocusTimers?.clear();
+        for (const target of this._tabTargets ?? [])
+            target.cancel();
+        this._tabTargets?.clear();
+        this._pinchTabTarget = null;
     }
 
     _close(win, time) {

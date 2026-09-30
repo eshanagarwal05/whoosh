@@ -1,0 +1,26 @@
+const fs=require('fs'),vm=require('vm'),assert=require('assert');
+const src=fs.readFileSync(require('path').join(__dirname, '../extension/extension-core.js'),'utf8').replace(/^import .*;\n/gm,'').replace('export default class WhooshExtension','class WhooshExtension');
+let notices=0,keys=[],mods=0,focus=true,wmClass='obsidian';let scheduled=new Map(),nextId=1;
+const Clutter={ModifierType:{SHIFT_MASK:1,CONTROL_MASK:4,MOD1_MASK:8,SUPER_MASK:16},InputDeviceType:{KEYBOARD_DEVICE:3},KeyState:{PRESSED:1,RELEASED:0},KEY_Control_L:100,KEY_Shift_L:101,KEY_w:119,get_default_backend:()=>({get_default_seat:()=>({create_virtual_device:()=>({notify_keyval:(t,k,s)=>keys.push([k,s])})})})};
+const GLib={PRIORITY_DEFAULT:0,SOURCE_REMOVE:false,SOURCE_CONTINUE:true,get_monotonic_time:()=>1,timeout_add:(p,t,cb)=>{const id=nextId++;scheduled.set(id,cb);return id},source_remove:id=>scheduled.delete(id)};
+const context={Extension:class{},Main:{notify:()=>notices++},GLib,Clutter,global:{get_pointer:()=>[0,0,mods],display:{get_current_time:()=>1}},console};vm.createContext(context);vm.runInContext(src+'\nthis.Core=WhooshExtension;',context);
+const c=new context.Core();c._tabTargets=new Set();c._tabFocusTimers=new Set();c._activate=()=>{};let windowsClosed=0;c._close=()=>windowsClosed++;
+const win={is_hidden:()=>false,has_focus:()=>focus,get_wm_class:()=>wmClass,get_buffer_rect:()=>({x:0,y:0,width:600,height:400})};
+for(const result of ['closed','tab-unavailable','unavailable'])c._finishTabClose(win,{close:cb=>cb(result)});
+assert.equal(windowsClosed,0);assert.equal(notices,2);
+c._finishTabClose(win,{allowWindowClose:false,close:cb=>cb('window')});assert.equal(windowsClosed,0);
+c._finishTabClose(win,{allowWindowClose:true,close:cb=>cb('window')});assert.equal(windowsClosed,1);
+c._finishTabClose(win,{allowWindowClose:false,close:cb=>cb('ignored')});assert.equal(windowsClosed,1);assert.equal(notices,2);
+c._performPinchClose(win,null,1);assert.equal(windowsClosed,1);
+c._finishTabClose(win,{close:cb=>cb('shortcut')});assert.deepEqual(keys,[[100,1],[119,1],[119,0],[100,0]]);
+keys=[];focus=false;c._closeSelectedTab(win);assert.equal(keys.length,0);
+focus=true;mods=1;c._closeSelectedTab(win);assert.equal(keys.length,0);mods=0;
+wmClass='org.gnome.Ptyxis';c._closeSelectedTab(win);assert.deepEqual(keys,[[101,1],[100,1],[119,1],[119,0],[100,0],[101,0]]);
+let cancelled=0,committed=0;const tab={matchesWindow:()=>true,cancel:()=>cancelled++,close:cb=>{committed++;cb('closed')}};
+focus=false;c._performPinchClose(win,tab,1);const callback=[...scheduled.values()].at(-1);assert.equal(callback(),true);assert.equal(committed,0);
+focus=true;assert.equal(callback(),false);assert.equal(committed,1);
+c._performPinchClose(win,{...tab,matchesWindow:()=>false},1);assert.equal(cancelled,1);
+focus=false;c._performPinchClose(win,tab,1);c._tabTargets.add(tab);c._cancelTabTargets();assert.equal(c._tabFocusTimers.size,0);assert.equal(cancelled,2);
+console.log('Close routing, focus waits, moved-window cancellation, modifier guard, Ctrl+W and terminal Ctrl+Shift+W checks passed');
+
+focus=true;const timersBefore=scheduled.size;const callsBefore=committed;c._performPinchClose(win,tab,1);assert.equal(committed,callsBefore+1);assert.equal(scheduled.size,timersBefore);console.log('Focused-window close has no activation timer');

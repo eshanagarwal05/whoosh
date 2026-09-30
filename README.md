@@ -10,12 +10,43 @@ Whoosh brings touchpad, mouse, and touchscreen window gestures to GNOME Shell 50
 | Two-finger swipe right | Tile right half |
 | Two-finger swipe up | Maximize |
 | Two-finger swipe down | Minimize |
-| Pinch in | Close |
+| Pinch in | Close the hovered tab, or close the window over the title bar |
 | Pinch out | Fullscreen |
 | Left → Up | Top-left quarter |
 | Left → Down | Bottom-left quarter |
 | Right → Up | Top-right quarter |
 | Right → Down | Bottom-right quarter |
+
+### Pinch to close tabs
+
+Pinch inward over a tab to close that tab, including inactive tabs, vertical
+strips, and tab rows below toolbars. Over the title-bar gesture area outside
+tabs, pinch inward closes the window. Over ordinary window content it does
+nothing. Pinch-out keeps its existing title-bar scope.
+
+Whoosh uses AT-SPI accessibility information to identify the target window and
+tab. It focuses the target window when needed to distinguish windows with the
+same title, including Chrome profile windows. It prefers the tab's close
+control; when necessary it selects and verifies the tab before sending the
+close-tab shortcut. This is Ctrl+W for most apps and Ctrl+Shift+W for supported
+terminal apps. Standard accessible tabs are supported generically, and
+Obsidian's custom note tabs have a dedicated adapter. Apps with inaccessible
+widgets or different shortcuts may require an adapter. Ambiguous or unavailable
+targets are left open.
+
+The helper requires Python 3, PyGObject, and the AT-SPI 2 introspection library
+(`gi.repository.Atspi`). Enable toolkit accessibility in GNOME; screen-reader
+speech is not required. Chrome and Obsidian must be launched with
+`--force-renderer-accessibility=complete`, including any profile/app shortcuts
+that start a separate browser process. Fully restart those apps after changing
+their launch flags. On installations whose launchers support per-user flags,
+add this flag to `~/.config/chrome-flags.conf` and
+`~/.config/obsidian/user-flags.conf`, respectively.
+
+Whoosh keeps one idle helper ready to avoid starting Python on each pinch.
+Each gesture still gets a separate cancellable process. Close actions begin
+when the pinch is recognized; focused windows do not wait for an activation
+timer.
 
 ### Mouse controls
 
@@ -125,7 +156,7 @@ Whoosh currently targets:
 - the `libinput` command-line tools
 - GNU coreutils (`stdbuf`)
 
-For building the extension locally, you also need Git, Make, `zip`, and
+For building and testing the extension locally, you also need Node.js, Git, Make, `zip`, and
 `glib-compile-schemas` from GLib.
 
 The extension metadata currently declares GNOME Shell 50 only. Other GNOME
