@@ -11,6 +11,9 @@ check:
 	node --check extension/extension-core.js
 	node --check extension/extension.js
 	node --check extension/tab-target.js
+	node --check extension/resize.js
+	node --check extension/resize-geometry.js
+	node tests/test-resize.cjs
 	node tests/test-core.cjs
 	node tests/test-pinch-timing.cjs
 	node tests/test-helper-lifecycle.cjs
@@ -25,7 +28,7 @@ check:
 extension-zip: check
 	mkdir -p dist
 	glib-compile-schemas --strict $(SCHEMA_DIR)
-	cd extension && zip -9 -r ../dist/$(UUID).zip extension.js extension-core.js tab-target.js tab-target.py touchscreen.js fourfinger.js mouse.js prefs.js metadata.json schemas
+	cd extension && zip -9 -r ../dist/$(UUID).zip extension.js extension-core.js tab-target.js tab-target.py touchscreen.js fourfinger.js mouse.js resize.js resize-geometry.js prefs.js metadata.json schemas
 
 clean:
 	rm -f dist/$(UUID).zip
