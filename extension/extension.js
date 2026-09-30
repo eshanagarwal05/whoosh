@@ -262,6 +262,7 @@ export default class WhooshExtension extends WhooshCoreExtension {
     }
 
     _resetTouchpadTargets() {
+        this._cancelTabTargets();
         this._lastHorizontal = null;
         this._scrollTarget = null;
         this._scrollOverviewTarget = null;

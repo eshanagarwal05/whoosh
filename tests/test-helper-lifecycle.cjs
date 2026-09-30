@@ -1,0 +1,15 @@
+const fs=require('fs'),vm=require('vm'),assert=require('assert');
+let processes=[];let nextTimer=1;
+const Gio={SubprocessFlags:{STDIN_PIPE:1,STDOUT_PIPE:2,STDERR_PIPE:4},Subprocess:{new:()=>{const p={killed:false,force_exit(){this.killed=true},communicate_utf8_async(input,c,cb){this.input=input;this.finish=()=>cb(this,{})},communicate_utf8_finish:()=>[true,'ignored',''],get_successful:()=>true};processes.push(p);return p}}};
+const GLib={PRIORITY_DEFAULT:0,timeout_add_once:()=>nextTimer++,source_remove:()=>{}};
+const ctx={Gio,GLib,console,global:{display:{get_monitor_scale:()=>1}}};vm.createContext(ctx);
+const source=fs.readFileSync(require('path').join(__dirname, '../extension/tab-target.js'),'utf8').replace(/^import .*;\n/gm,'').replaceAll('export function','function').replace('export class TabTarget','class TabTarget');vm.runInContext(source+'\nthis.API={TabTarget,startTabHelper,stopTabHelper};',ctx);
+const {TabTarget,startTabHelper,stopTabHelper}=ctx.API;
+const rect={x:0,y:0,width:600,height:400};const win={get_buffer_rect:()=>rect,get_frame_rect:()=>rect,get_wm_class:()=>'',get_monitor:()=>0,get_pid:()=>1,get_title:()=>''};
+startTabHelper('/test');assert.equal(processes.length,1);
+const target=new TabTarget('/test',win,100,200,false);assert.equal(processes.length,1);
+let delivered=false;target.close(outcome=>{assert.equal(outcome,'ignored');assert.equal(processes.length,1);delivered=true});
+processes[0].finish();assert(delivered);assert(processes[0].killed);assert.equal(processes.length,2);
+stopTabHelper();assert(processes[1].killed);
+startTabHelper('/test');const active=new TabTarget('/test',win,100,200,false);stopTabHelper();active.cancel();assert.equal(processes.length,3);assert(processes[2].killed);
+console.log('Prewarming, single-use isolation, callback-before-replenishment and disable cleanup passed');
