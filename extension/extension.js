@@ -10,6 +10,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import WhooshCoreExtension from './extension-core.js';
 import {FourFingerTouchController} from './fourfinger.js';
 import {MouseScrollController} from './mouse.js';
+import {WindowResizeController} from './resize.js';
 
 const OBJECT_PATH = '/io/github/eshanagarwal05/Whoosh';
 const INTERFACE_NAME = 'io.github.eshanagarwal05.Whoosh';
@@ -74,6 +75,14 @@ export default class WhooshExtension extends WhooshCoreExtension {
         });
         try {
             super.enable();
+            this._windowResize = new WindowResizeController(win => {
+                this._cancelResizeGuard(win);
+                const actor = win.get_compositor_private();
+                if (actor)
+                    this._finishTileAnimation(actor);
+                this._prepareForResize(win, actor);
+            });
+            this._windowResize.enable();
             this._overviewShowingId = Main.overview.connect(
                 'showing',
                 () => this._onTouchscreenOverviewShowing()
@@ -87,6 +96,8 @@ export default class WhooshExtension extends WhooshCoreExtension {
             this._sendBackendConfiguration(true);
             this._sendMouseConfiguration(true);
         } catch (error) {
+            this._windowResize?.disable();
+            this._windowResize = null;
             this._disconnectTouchscreenOverviewSignals();
             if (this._mouseButtonSignalId) {
                 Gio.DBus.system.signal_unsubscribe(
@@ -105,6 +116,8 @@ export default class WhooshExtension extends WhooshCoreExtension {
     }
 
     disable() {
+        this._windowResize?.disable();
+        this._windowResize = null;
         this._sendMouseSuppressionState(false);
         this._sendMouseConfiguration(true, false);
         this._disconnectSettings();

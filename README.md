@@ -401,3 +401,29 @@ https://github.com/eshanagarwal05/whoosh
 ## License
 
 GPL-3.0-or-later. See `LICENSE`.
+
+## Window resizing
+
+Hold **Alt before pressing the left mouse button** on a window edge, then drag.
+The opposite edge moves by the same amount, keeping the center fixed. Drag a
+corner to resize both dimensions around the center. Release the mouse to finish;
+Escape restores the starting geometry.
+
+When two resizable windows touch along a vertical or horizontal edge, Whoosh
+shows a small handle when you hover at the midpoint of their shared border.
+The handle is invisible when you move away. Drag it to resize
+both windows while keeping their outer edges fixed. Each application's declared
+minimum and maximum sizes limit the drag. Handles are hidden when their midpoint
+is covered, in Overview, on the lock screen, and during other window grabs.
+These features are enabled independently of the mouse-scroll gesture setting and
+do not require the input backend.
+
+Desktop smoke testing confirmed Alt resizing and the shared handle after the
+hover-only and border-input fixes. Additional regression scenarios:
+
+- Try every edge and corner with Alt, including shrinking to an app's minimum.
+- Place two windows side by side, then vertically; drag their shared handle.
+- Try windows with different minimum sizes and partially overlapping borders.
+- Check Wayland and X11 clients, fractional scaling, and multiple monitors.
+- Press Escape, close a participating window, switch workspaces, and disable
+  Whoosh during a drag; confirm that pointer input is released.
