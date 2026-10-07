@@ -10,7 +10,7 @@ Whoosh brings touchpad, mouse, and touchscreen window gestures to GNOME Shell 50
 | Two-finger swipe right | Tile right half |
 | Two-finger swipe up | Maximize |
 | Two-finger swipe down | Minimize |
-| Pinch in | Close the hovered tab, or close the window over the title bar |
+| Pinch in | Close the hovered tab when possible, otherwise close the window |
 | Pinch out | Fullscreen |
 | Left → Up | Top-left quarter |
 | Left → Down | Bottom-left quarter |
@@ -20,9 +20,10 @@ Whoosh brings touchpad, mouse, and touchscreen window gestures to GNOME Shell 50
 ### Pinch to close tabs
 
 Pinch inward over a tab to close that tab, including inactive tabs, vertical
-strips, and tab rows below toolbars. Over the title-bar gesture area outside
-tabs, pinch inward closes the window. Over ordinary window content it does
-nothing. Pinch-out keeps its existing title-bar scope.
+strips, and tab rows below toolbars. If no tab is found, tab detection fails,
+or the tab cannot be closed, pinch inward closes the target window. This applies
+anywhere over the window, including ordinary content. Pinch-out keeps its
+existing title-bar scope.
 
 Whoosh uses AT-SPI accessibility information to identify the target window and
 tab. It focuses the target window when needed to distinguish windows with the
@@ -31,12 +32,25 @@ control; when necessary it selects and verifies the tab before sending the
 close-tab shortcut. This is Ctrl+W for most apps and Ctrl+Shift+W for supported
 terminal apps. Standard accessible tabs are supported generically, and
 Obsidian's custom note tabs have a dedicated adapter. Apps with inaccessible
-widgets or different shortcuts may require an adapter. Ambiguous or unavailable
-targets are left open.
+widgets or different shortcuts fall back to closing the target window. The
+window manager may still ask you to save unsaved work before closing.
 
 The helper requires Python 3, PyGObject, and the AT-SPI 2 introspection library
-(`gi.repository.Atspi`). Enable toolkit accessibility in GNOME; screen-reader
-speech is not required. Chrome and Obsidian must be launched with
+(`gi.repository.Atspi`). Whoosh enables GNOME toolkit accessibility when it
+starts, without starting screen-reader speech. It leaves accessibility enabled
+when disabled so other accessibility clients continue working. Apps that were
+already running may need to be restarted. You can also enable it manually:
+
+```sh
+gsettings set org.gnome.desktop.interface toolkit-accessibility true
+```
+
+Fully restart the affected apps afterward. If the log says `Application
+accessibility is unavailable`, the app may not be registered on the accessibility
+bus. Whoosh also supports a different accessibility process ID when exactly one
+active window matches the captured title and geometry.
+
+Chrome and Obsidian must be launched with
 `--force-renderer-accessibility=complete`, including any profile/app shortcuts
 that start a separate browser process. Fully restart those apps after changing
 their launch flags. On installations whose launchers support per-user flags,

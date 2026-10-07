@@ -40,28 +40,41 @@ def contains_point(rect, x, y):
 def find_tab(root, x, y, api, include_documents=False, app_class='', document_scale=1):
     stack = [(root, False)]
     budget = 2048
+    lookup_error = None
     while stack:
         budget -= 1
         if budget < 0:
             raise RuntimeError('Accessibility tree exceeded search limit')
         node, in_document = stack.pop()
-        role = node.get_role()
-        in_document = in_document or role in (api.Role.DOCUMENT_WEB, api.Role.DOCUMENT_FRAME)
-        px, py = (x * document_scale, y * document_scale) if in_document else (x, y)
-        # Web content can itself contain ARIA tabs; those are not browser tabs.
-        if not include_documents and role in (api.Role.DOCUMENT_WEB, api.Role.DOCUMENT_FRAME):
-            continue
-        component = node.get_component_iface()
-        if node != root and component:
-            r = component.get_extents(api.CoordType.WINDOW)
-            if r.width > 0 and r.height > 0 and not contains_point(r, px, py):
+        try:
+            role = node.get_role()
+            in_document = in_document or role in (api.Role.DOCUMENT_WEB, api.Role.DOCUMENT_FRAME)
+            px, py = (x * document_scale, y * document_scale) if in_document else (x, y)
+            # Web content can itself contain ARIA tabs; those are not browser tabs.
+            if not include_documents and role in (api.Role.DOCUMENT_WEB, api.Role.DOCUMENT_FRAME):
                 continue
-        if is_tab(node, api, app_class):
-            state = node.get_state_set()
-            if (state.contains(api.StateType.SHOWING) and
-                    contains_point(node.get_component_iface().get_extents(api.CoordType.WINDOW), px, py)):
-                return node
-        stack.extend((child, in_document) for child in children(node) if child is not None)
+            # Structural containers need not enclose their accessible children.
+            # Hit-test the tab itself instead of pruning by ancestor geometry.
+            if is_tab(node, api, app_class):
+                state = node.get_state_set()
+                component = node.get_component_iface()
+                if (component and state.contains(api.StateType.SHOWING) and
+                        contains_point(component.get_extents(api.CoordType.WINDOW), px, py)):
+                    return node
+            count = node.get_child_count()
+        except Exception as error:
+            lookup_error = error
+            continue
+        for index in range(count):
+            try:
+                child = node.get_child_at_index(index)
+                if child is not None:
+                    stack.append((child, in_document))
+            except Exception as error:
+                lookup_error = error
+    # Report incomplete lookup to Shell, which applies the window fallback.
+    if lookup_error is not None:
+        raise RuntimeError(f'Accessibility tree could not be fully inspected: {lookup_error}')
     return None
 
 
@@ -162,16 +175,52 @@ def choose_window(candidates, title, api, bounds=None, require_active=False):
 def resolve(pid, title, x, y, api, bounds=None, require_active=False, include_documents=False, app_class="", document_scale=1):
     desktop = api.get_desktop(0)
     apps = []
+    registered_apps = []
     for app in children(desktop):
+        if app is None:
+            continue
+        registered_apps.append(app)
         try:
             if app.get_process_id() == pid:
                 apps.append(app)
         except Exception:
             continue  # An unrelated stale app must not break the gesture.
-    if not apps:
-        raise RuntimeError('Application accessibility is unavailable')
-    candidates = [node for app in apps for node in children(app)]
-    root = choose_window(candidates, title, api, bounds, require_active)
+    if apps:
+        candidates = [node for app in apps for node in children(app)]
+        root = choose_window(candidates, title, api, bounds, require_active)
+    else:
+        # Sandboxed/multiprocess apps can register AT-SPI under a different
+        # PID from Meta.Window. Require all available window identity evidence
+        # before accepting a cross-process match; never guess from size alone.
+        matches = []
+        if title and bounds and require_active:
+            for app in registered_apps:
+                try:
+                    count = app.get_child_count()
+                except Exception:
+                    continue
+                for index in range(count):
+                    try:
+                        node = app.get_child_at_index(index)
+                        if (node is None or not visible(node, api) or
+                                node.get_role() not in (api.Role.FRAME, api.Role.WINDOW, api.Role.DIALOG) or
+                                not node.get_state_set().contains(api.StateType.ACTIVE)):
+                            continue
+                        name = node.get_name()
+                        if name != title and not name.startswith(title + ' - '):
+                            continue
+                        component = node.get_component_iface()
+                        if not component:
+                            continue
+                        r = component.get_extents(api.CoordType.WINDOW)
+                        if any(abs(r.width - b['width']) <= 2 and
+                               abs(r.height - b['height']) <= 2 for b in bounds):
+                            matches.append(node)
+                    except Exception:
+                        continue
+        if len(matches) != 1:
+            raise RuntimeError(f'Application accessibility is unavailable or target window is ambiguous (pid={pid}, title={title!r}, registered_apps={len(registered_apps)}, matching_windows={len(matches)})')
+        root = matches[0]
     if bounds:
         r = root.get_component_iface().get_extents(api.CoordType.WINDOW)
         # GTK often excludes shadows; Chromium includes them. Shell provides
@@ -185,18 +234,7 @@ def resolve(pid, title, x, y, api, bounds=None, require_active=False, include_do
 
 
 def no_tab_outcome(target):
-    if isinstance(target, list):
-        # Legacy protocol had no frame geometry: never guess a window close.
-        return 'closed'
-    if 'allowWindowClose' in target:
-        return 'window' if target['allowWindowClose'] else 'ignored'
-    # The already-running revision-2 Shell uses this protocol until logout.
-    # Match its existing title-bar zone and use its no-op success response
-    # outside it, applying the safety fix immediately without a Shell reload.
-    frame = target['bounds'][-1]
-    on_titlebar = (frame['x'] <= target['x'] < frame['x'] + frame['width'] and
-                   frame['y'] <= target['y'] < frame['y'] + min(56, frame['height']))
-    return 'window' if on_titlebar else 'closed'
+    return 'window'
 
 
 def main():

@@ -1489,12 +1489,16 @@ export default class WhooshExtension extends Extension {
     }
 
     _performPinchClose(win, tab, time) {
-        // A failed lookup must never turn an ordinary content pinch into a close.
-        if (!tab)
+        if (win.is_hidden())
             return;
+        if (!tab) {
+            this._close(win, time);
+            return;
+        }
         if (!tab.matchesWindow(win)) {
             tab.cancel();
             this._tabTargets.delete(tab);
+            this._close(win, time);
             return;
         }
         // Already-focused windows need no activation timer. Keep asynchronous
@@ -1515,6 +1519,8 @@ export default class WhooshExtension extends Extension {
                 this._tabFocusTimers.delete(timer);
                 this._tabTargets.delete(tab);
                 tab.cancel();
+                if (!win.is_hidden())
+                    this._close(win, global.display.get_current_time());
                 return GLib.SOURCE_REMOVE;
             }
             if (!win.has_focus())
@@ -1529,25 +1535,30 @@ export default class WhooshExtension extends Extension {
     _finishTabClose(win, tab) {
         tab.close(outcome => {
             this._tabTargets.delete(tab);
-            if (outcome === 'window' && tab.allowWindowClose && !win.is_hidden())
-                this._close(win, global.display.get_current_time());
-            else if (outcome === 'shortcut')
-                this._closeSelectedTab(win);
-            else if (outcome !== 'closed' && outcome !== 'window' && outcome !== 'ignored')
-                Main.notify('Whoosh', 'Tab detection is unavailable in this app. The window was left open.');
+            if (outcome === 'closed' || win.is_hidden())
+                return;
+            if (outcome === 'shortcut') {
+                try {
+                    if (this._closeSelectedTab(win))
+                        return;
+                } catch (error) {
+                    console.error(`Whoosh tab shortcut failed: ${error}`);
+                }
+            }
+            this._close(win, global.display.get_current_time());
         });
     }
 
     _closeSelectedTab(win) {
         // Never let a delayed helper send Ctrl+W to a newly focused app.
         if (!win.has_focus() || win.is_hidden())
-            return;
+            return false;
         const [, , modifiers] = global.get_pointer();
         const shortcutModifiers = Clutter.ModifierType.SHIFT_MASK |
             Clutter.ModifierType.CONTROL_MASK | Clutter.ModifierType.MOD1_MASK |
             Clutter.ModifierType.SUPER_MASK;
         if (modifiers & shortcutModifiers)
-            return;
+            return false;
         this._tabKeyboard ??= Clutter.get_default_backend().get_default_seat()
             .create_virtual_device(Clutter.InputDeviceType.KEYBOARD_DEVICE);
         const now = GLib.get_monotonic_time();
@@ -1563,6 +1574,7 @@ export default class WhooshExtension extends Extension {
             if (shift)
                 this._tabKeyboard.notify_keyval(now, Clutter.KEY_Shift_L, Clutter.KeyState.RELEASED);
         }
+        return true;
     }
 
     _cancelTabTargets() {
