@@ -38,6 +38,30 @@ class Tests(unittest.TestCase):
  def test_electron_tabs_in_document(self):
   a=Node(1,bounds=(200,200,100,50));self.assertIs(m.find_tab(Node(2,bounds=(0,0,1200,800),kids=[a]),120,110,api,True,'electron',2),a)
  def test_hidden_tab(self):self.assertIsNone(m.find_tab(Node(1,states=[]),10,10,api))
+ def test_tab_outside_container_bounds(self):
+  tab=Node(R.PAGE_TAB,bounds=(100,100,100,30))
+  container=Node(bounds=(0,0,50,50),kids=[tab])
+  self.assertIs(m.find_tab(Node(kids=[container]),150,110,api),tab)
+ def test_stale_sibling_does_not_hide_tab(self):
+  class Stale(Node):
+   def get_role(self):raise RuntimeError('defunct')
+  tab=Node(R.PAGE_TAB,bounds=(100,100,100,30))
+  self.assertIs(m.find_tab(Node(kids=[tab,Stale()]),150,110,api),tab)
+ def test_stale_child_fetch_does_not_hide_tab(self):
+  class Container(Node):
+   def get_child_at_index(self,i):
+    if i==0:raise RuntimeError('defunct')
+    return super().get_child_at_index(i)
+  tab=Node(R.PAGE_TAB,bounds=(100,100,100,30))
+  self.assertIs(m.find_tab(Container(kids=[Node(),tab]),150,110,api),tab)
+ def test_incomplete_lookup_cannot_report_no_tab(self):
+  class Stale(Node):
+   def get_role(self):raise RuntimeError('defunct')
+  with self.assertRaises(RuntimeError):m.find_tab(Node(kids=[Stale()]),150,110,api)
+ def test_tab_without_component(self):
+  class NonvisualTab(Node):
+   def get_component_iface(self):return None
+  self.assertIsNone(m.find_tab(Node(kids=[NonvisualTab(R.PAGE_TAB)]),10,10,api))
  def test_direct_close(self):
   a=Node(1,actions=['activate','close']);self.assertTrue(m.close_tab(a,api));self.assertEqual(a.calls,[1])
  def test_child_close(self):
@@ -65,5 +89,30 @@ class Tests(unittest.TestCase):
   a=Node(5,'New Tab',bounds=(0,0,500,400));b=Node(5,'New Tab');self.assertIs(m.choose_window([a,b],'New Tab',api,[{'width':600,'height':400}]),b)
  def test_popup_not_selected(self):
   a=Node(5,'New Tab');self.assertIs(m.choose_window([a,Node(5,'',bounds=(0,0,50,20))],'New Tab',api),a)
+class ResolveTests(unittest.TestCase):
+ def resolve(self, frames, title='Window', active=True, bounds=True):
+  desktop=Node(kids=[Node(kids=frames,pid=99)])
+  test_api=NS(**vars(api),get_desktop=lambda _:desktop)
+  return m.resolve(1,title,150,110,test_api,
+   [{'x':0,'y':0,'width':600,'height':400}] if bounds else None,active)
+ def frame(self, title='Window', states=(1,2), bounds=(0,0,600,400)):
+  return Node(R.FRAME,title,bounds,kids=[Node(R.PAGE_TAB,bounds=(100,100,100,30))],states=states)
+ def test_cross_process_active_window(self):
+  frame=self.frame();self.assertIs(self.resolve([frame]),frame.kids[0])
+ def test_cross_process_ambiguous_refused(self):
+  with self.assertRaises(RuntimeError):self.resolve([self.frame(),self.frame()])
+ def test_cross_process_inactive_refused(self):
+  with self.assertRaises(RuntimeError):self.resolve([self.frame(states=(1,))])
+ def test_cross_process_wrong_title_refused(self):
+  with self.assertRaises(RuntimeError):self.resolve([self.frame(title='Other')])
+ def test_cross_process_wrong_geometry_refused(self):
+  with self.assertRaises(RuntimeError):self.resolve([self.frame(bounds=(0,0,500,400))])
+ def test_cross_process_missing_title_refused(self):
+  with self.assertRaises(RuntimeError):self.resolve([self.frame()],title='')
+ def test_cross_process_missing_bounds_refused(self):
+  with self.assertRaises(RuntimeError):self.resolve([self.frame()],bounds=False)
+ def test_cross_process_no_focus_confirmation_refused(self):
+  with self.assertRaises(RuntimeError):self.resolve([self.frame()],active=False)
+
 if __name__ == '__main__':
  unittest.main()

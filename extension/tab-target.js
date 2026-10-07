@@ -22,6 +22,17 @@ function prepareSpare() {
 
 export function startTabHelper(path) {
     helperPath = path;
+    // Tab gestures depend on the desktop accessibility bus for every app.
+    // Enable toolkit support without starting screen-reader speech. Leave it
+    // enabled on disable: other accessibility clients may now depend on it.
+    try {
+        const settings = new Gio.Settings({schema_id: 'org.gnome.desktop.interface'});
+        if (!settings.get_boolean('toolkit-accessibility') &&
+                !settings.set_boolean('toolkit-accessibility', true))
+            console.error('Whoosh could not enable desktop accessibility');
+    } catch (error) {
+        console.error(`Whoosh accessibility setup failed: ${error}`);
+    }
     prepareSpare();
 }
 
@@ -50,8 +61,13 @@ export class TabTarget {
         if (!this._process)
             throw new Error('Whoosh accessibility helper is unavailable');
         this._cancelled = false;
-        this._timeout = GLib.timeout_add_once(GLib.PRIORITY_DEFAULT, 16000,
-            () => { this._timeout = 0; this.cancel(); });
+        this._expire = () => {
+            this._timeout = 0;
+            const callback = this._closeCallback;
+            this.cancel();
+            callback?.('unavailable');
+        };
+        this._timeout = GLib.timeout_add_once(GLib.PRIORITY_DEFAULT, 16000, this._expire);
     }
 
     matchesWindow(win) {
@@ -60,8 +76,13 @@ export class TabTarget {
     }
 
     close(callback) {
-        if (this._cancelled)
+        if (this._cancelled) {
+            callback('unavailable');
             return;
+        }
+        this._closeCallback = callback;
+        GLib.source_remove(this._timeout);
+        this._timeout = GLib.timeout_add_once(GLib.PRIORITY_DEFAULT, 2000, this._expire);
         this._process.communicate_utf8_async(`${this._target}\nclose\n`, null, (process, result) => {
             if (this._cancelled)
                 return;
@@ -75,6 +96,7 @@ export class TabTarget {
             } catch (error) {
                 console.error(`Whoosh tab close failed: ${error}`);
             }
+            this._closeCallback = null;
             try {
                 callback(outcome);
             } finally {
@@ -87,6 +109,7 @@ export class TabTarget {
         if (this._cancelled)
             return;
         this._cancelled = true;
+        this._closeCallback = null;
         if (this._timeout) {
             GLib.source_remove(this._timeout);
             this._timeout = 0;

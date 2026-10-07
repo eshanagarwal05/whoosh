@@ -6,12 +6,9 @@ const GLib={PRIORITY_DEFAULT:0,SOURCE_REMOVE:false,SOURCE_CONTINUE:true,get_mono
 const context={Extension:class{},Main:{notify:()=>notices++},GLib,Clutter,global:{get_pointer:()=>[0,0,mods],display:{get_current_time:()=>1}},console};vm.createContext(context);vm.runInContext(src+'\nthis.Core=WhooshExtension;',context);
 const c=new context.Core();c._tabTargets=new Set();c._tabFocusTimers=new Set();c._activate=()=>{};let windowsClosed=0;c._close=()=>windowsClosed++;
 const win={is_hidden:()=>false,has_focus:()=>focus,get_wm_class:()=>wmClass,get_buffer_rect:()=>({x:0,y:0,width:600,height:400})};
-for(const result of ['closed','tab-unavailable','unavailable'])c._finishTabClose(win,{close:cb=>cb(result)});
-assert.equal(windowsClosed,0);assert.equal(notices,2);
-c._finishTabClose(win,{allowWindowClose:false,close:cb=>cb('window')});assert.equal(windowsClosed,0);
-c._finishTabClose(win,{allowWindowClose:true,close:cb=>cb('window')});assert.equal(windowsClosed,1);
-c._finishTabClose(win,{allowWindowClose:false,close:cb=>cb('ignored')});assert.equal(windowsClosed,1);assert.equal(notices,2);
-c._performPinchClose(win,null,1);assert.equal(windowsClosed,1);
+for(const result of ['closed','tab-unavailable','unavailable','window','ignored','unexpected'])c._finishTabClose(win,{close:cb=>cb(result)});
+assert.equal(windowsClosed,5);assert.equal(notices,0);
+c._performPinchClose(win,null,1);assert.equal(windowsClosed,6);
 c._finishTabClose(win,{close:cb=>cb('shortcut')});assert.deepEqual(keys,[[100,1],[119,1],[119,0],[100,0]]);
 keys=[];focus=false;c._closeSelectedTab(win);assert.equal(keys.length,0);
 focus=true;mods=1;c._closeSelectedTab(win);assert.equal(keys.length,0);mods=0;
@@ -24,3 +21,10 @@ focus=false;c._performPinchClose(win,tab,1);c._tabTargets.add(tab);c._cancelTabT
 console.log('Close routing, focus waits, moved-window cancellation, modifier guard, Ctrl+W and terminal Ctrl+Shift+W checks passed');
 
 focus=true;const timersBefore=scheduled.size;const callsBefore=committed;c._performPinchClose(win,tab,1);assert.equal(committed,callsBefore+1);assert.equal(scheduled.size,timersBefore);console.log('Focused-window close has no activation timer');
+
+let before=windowsClosed;mods=1;c._finishTabClose(win,{close:cb=>cb('shortcut')});assert.equal(windowsClosed,before+1);mods=0;
+before=windowsClosed;focus=false;c._finishTabClose(win,{close:cb=>cb('shortcut')});assert.equal(windowsClosed,before+1);focus=true;
+before=windowsClosed;c._finishTabClose({...win,is_hidden:()=>true},{close:cb=>cb('unavailable')});assert.equal(windowsClosed,before);
+focus=false;c._performPinchClose(win,tab,1);const stalledFocus=[...scheduled.values()].at(-1);
+for(let i=0;i<21;i++)stalledFocus();assert.equal(windowsClosed,before+1);focus=true;
+console.log('Blocked shortcut and focus timeout close target window; hidden windows stay untouched');
