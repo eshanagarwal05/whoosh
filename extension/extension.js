@@ -68,6 +68,7 @@ export default class WhooshExtension extends WhooshCoreExtension {
 
         this._fourFingerTouch = new FourFingerTouchController({
             getWindowAt: (x, y) => this._getWindowUnderPointer(x, y),
+            canCloseAt: (win, x, y) => this._isInGestureZone(win, x, y),
             applyAction: (win, action) =>
                 this._applyFourFingerTouchAction(win, action),
             onMultitouchBegin: () => this._pauseSingleTouchController(),
@@ -831,3 +832,4 @@ export default class WhooshExtension extends WhooshCoreExtension {
         );
     }
 }
+
