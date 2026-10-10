@@ -13,11 +13,13 @@ const MULTITOUCH_STALE_MS = 2000;
 export class FourFingerTouchController {
     constructor({
         getWindowAt,
+        canCloseAt,
         applyAction,
         onMultitouchBegin = null,
         onMultitouchEnd = null,
     }) {
         this._getWindowAt = getWindowAt;
+        this._canCloseAt = canCloseAt;
         this._applyAction = applyAction;
         this._onMultitouchBegin = onMultitouchBegin;
         this._onMultitouchEnd = onMultitouchEnd;
@@ -225,6 +227,7 @@ export class FourFingerTouchController {
 
         this._gesture = {
             window: win,
+            closeAllowed: this._canCloseAt(win, geometry.centerX, geometry.centerY),
             initialSpread: geometry.spread,
             minScale: 1,
             maxScale: 1,
@@ -263,6 +266,9 @@ export class FourFingerTouchController {
             pinchedIn && (!pinchedOut || inwardAmount >= outwardAmount)
                 ? 'close'
                 : 'fullscreen';
+        if (action === 'close' && !gesture.closeAllowed)
+            return;
+
         const win = gesture.window;
 
         let sourceId = 0;
@@ -287,3 +293,4 @@ export class FourFingerTouchController {
         this._applySources.add(sourceId);
     }
 }
+
