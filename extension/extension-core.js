@@ -222,8 +222,10 @@ export default class WhooshExtension extends Extension {
             }
 
             const win = this._getWindowUnderPointer(px, py);
-            this._pinchTarget = win;
             this._pinchFullscreenAllowed = win && this._isInGestureZone(win, px, py);
+            // Capture scope at gesture start; moving into the title bar later
+            // must not turn an ordinary content pinch into a close request.
+            this._pinchTarget = this._pinchFullscreenAllowed ? win : null;
             if (this._pinchTarget) {
                 try {
                     this._pinchTabTarget = new TabTarget(this.path, win, px, py, this._pinchFullscreenAllowed);
@@ -1594,3 +1596,4 @@ export default class WhooshExtension extends Extension {
             win.delete(time);
     }
 }
+
