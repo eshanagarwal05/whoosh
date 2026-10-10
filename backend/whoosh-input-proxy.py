@@ -393,52 +393,22 @@ class TouchpadProxy:
         if self.base_centroid is None:
             return
 
-        now = time.monotonic()
         dx = centroid[0] - self.base_centroid[0]
         dy = centroid[1] - self.base_centroid[1]
-        ax = abs(dx)
-        ay = abs(dy)
-        action_mm = self.configuration.action_mm
+        ax, ay = abs(dx), abs(dy)
+        threshold = self.configuration.action_mm
+        if ax >= threshold and ax >= ay * DOMINANCE:
+            action = "left" if dx < 0 else "right"
+        elif ay >= threshold and ay >= ax * DOMINANCE:
+            action = "up" if dy < 0 else "down"
+        else:
+            return
 
         if not self.action_emitted:
-            if ax >= action_mm and ax >= ay * DOMINANCE:
-                side = "left" if dx < 0 else "right"
-                self.action_emitted = True
-                self.action_side = side
-                self.action_time = now
-                self.action_y = centroid[1]
-
-                self.send_action("scroll_begin")
-                self.send_action(side)
-                self.log(f"suppressed horizontal action {side}")
-                return
-
-            if ay >= action_mm and ay >= ax * DOMINANCE:
-                vertical = "up" if dy < 0 else "down"
-                self.action_emitted = True
-                self.corner_emitted = True
-                self.action_time = now
-
-                self.send_action("scroll_begin")
-                self.send_action(vertical)
-                self.log(f"suppressed vertical action {vertical}")
-
-            return
-
-        if self.corner_emitted:
-            return
-
-        if now - self.action_time > self.configuration.corner_timeout:
-            return
-
-        corner_dy = centroid[1] - self.action_y
-
-        if abs(corner_dy) >= self.configuration.corner_mm:
-            vertical = "up" if corner_dy < 0 else "down"
-            self.corner_emitted = True
-            action = f"corner_{self.action_side}_{vertical}"
-            self.send_action(action)
-            self.log(f"suppressed corner action {action}")
+            self.send_action("scroll_begin")
+        self.action_emitted = True
+        self.base_centroid = centroid
+        self.send_action(action)
 
     def _start_candidate(self):
         centroid, distance = self._geometry()
@@ -793,3 +763,4 @@ def main():
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
