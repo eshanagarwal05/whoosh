@@ -19,11 +19,11 @@ Whoosh brings touchpad, mouse, and touchscreen window gestures to GNOME Shell 50
 
 ### Pinch to close tabs
 
-Pinch inward over a tab to close that tab, including inactive tabs, vertical
-strips, and tab rows below toolbars. If no tab is found, tab detection fails,
-or the tab cannot be closed, pinch inward closes the target window. This applies
-anywhere over the window, including ordinary content. Pinch-out keeps its
-existing title-bar scope.
+Pinch inward over the title bar to close the hovered tab when possible,
+otherwise close the window. Pinches that start over ordinary window content,
+including tab rows outside the title bar, do not close tabs or windows.
+Moving into the title bar after starting a pinch does not enable closing.
+Pinch-out keeps its existing title-bar scope.
 
 Whoosh uses AT-SPI accessibility information to identify the target window and
 tab. It focuses the target window when needed to distinguish windows with the
@@ -95,7 +95,7 @@ mouse before enabling native Whoosh button gestures.
 | Four-finger pinch / swipe in | Close the window |
 | Four-finger spread / swipe out | Fullscreen the window |
 
-Four-finger touchscreen gestures can begin anywhere over the visible window, not just the title bar. Whoosh measures the spread of all four contacts, so moving four fingers together does not count as a pinch. The close or fullscreen action is applied only after all fingers are released.
+Four-finger touchscreen pinch-to-close must start with the center of the four contacts over the title bar. Pinch-to-fullscreen can begin anywhere over the visible window. Whoosh measures the spread of all four contacts, so moving four fingers together does not count as a pinch. The close or fullscreen action is applied only after all fingers are released.
 
 When a multi-touch touchscreen sequence begins, Whoosh temporarily pauses its one-finger title-bar drag controller. It restores that controller after the fingers are released, preventing the title-bar drag recognizer from competing with a four-finger gesture.
 
@@ -441,3 +441,4 @@ hover-only and border-input fixes. Additional regression scenarios:
 - Check Wayland and X11 clients, fractional scaling, and multiple monitors.
 - Press Escape, close a participating window, switch workspaces, and disable
   Whoosh during a drag; confirm that pointer input is released.
+

@@ -28,3 +28,31 @@ before=windowsClosed;c._finishTabClose({...win,is_hidden:()=>true},{close:cb=>cb
 focus=false;c._performPinchClose(win,tab,1);const stalledFocus=[...scheduled.values()].at(-1);
 for(let i=0;i<21;i++)stalledFocus();assert.equal(windowsClosed,before+1);focus=true;
 console.log('Blocked shortcut and focus timeout close target window; hidden windows stay untouched');
+
+
+// Gesture scope is captured at begin, including the exclusive bottom edge.
+c._getOverviewWindowUnderPointer=()=>null;c._getDashAppUnderPointer=()=>null;
+c._getWindowUnderPointer=()=>scopeWin;
+const scopeWin={...win,get_frame_rect:()=>({x:100,y:100,width:600,height:400})};
+let pointer=[300,300,0],pinchCloses=0,lookups=0;
+context.global.get_pointer=()=>pointer;
+context.TabTarget=class {constructor(){lookups++} cancel(){}};
+c._performPinchClose=()=>pinchCloses++;
+for(const [x,y,allowed] of [[300,120,true],[300,155,true],[300,156,false],[300,300,false],[95,120,false],[300,500,false]]){
+ pointer=[x,y,0];const previous=pinchCloses,previousLookups=lookups;
+ c._handleAction('pinch_begin');pointer=[300,120,0];c._handleAction('pinch_in');
+ assert.equal(pinchCloses,previous+Number(allowed));assert.equal(lookups,previousLookups+Number(allowed));
+}
+console.log('Touchpad content pinches cannot close, even after moving into title bar');
+
+const fourSource=fs.readFileSync(require('path').join(__dirname,'../extension/fourfinger.js'),'utf8').replace(/^import .*;\n/gm,'').replace('export class FourFingerTouchController','class FourFingerTouchController');
+vm.runInContext(fourSource+'\nthis.Four=FourFingerTouchController;',context);
+let touchActions=[];GLib.idle_add=(priority,cb)=>{cb();return 1};
+const four=new context.Four({getWindowAt:()=>scopeWin,canCloseAt:(w,x,y)=>c._isInGestureZone(w,x,y),applyAction:(w,a)=>touchActions.push(a)});
+for(const [y,scale,expected] of [[120,0.6,'close'],[300,0.6,null],[156,0.6,null],[300,1.4,'fullscreen']]){
+ four._geometry=()=>({centerX:300,centerY:y,spread:60});four._beginGesture();
+ four._gesture.minScale=Math.min(1,scale);four._gesture.maxScale=Math.max(1,scale);
+ const previous=touchActions.length;four._finishGesture();assert.equal(touchActions.length,previous+Number(expected!==null));
+ if(expected)assert.equal(touchActions.at(-1),expected);
+}
+console.log('Touchscreen close is title-bar only; content fullscreen still works');
