@@ -442,3 +442,13 @@ hover-only and border-input fixes. Additional regression scenarios:
 - Press Escape, close a participating window, switch workspaces, and disable
   Whoosh during a drag; confirm that pointer input is released.
 
+
+### Fine trackpad tiling with Shift
+
+Hold Shift and swipe left or right to preview an outer third. Swipe back
+inward to step through left third, left two-thirds, center third, right
+two-thirds, and right third. Further outward swipes stay at the edge;
+there is no wrapping size cycle. Add an up/down swipe for half-height
+positions, including sixth-screen corners and centered sixths. Without
+Shift, corner gestures still use quarters. Lift to apply the preview.
+Application minimum sizes may limit smaller tiles.
