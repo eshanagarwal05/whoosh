@@ -14,6 +14,7 @@ check:
 	node --check extension/resize.js
 	node --check extension/resize-geometry.js
 	node tests/test-resize.cjs
+	node tests/test-swipe-preview.cjs
 	node tests/test-core.cjs
 	node tests/test-pinch-timing.cjs
 	node tests/test-helper-lifecycle.cjs
@@ -34,3 +35,4 @@ clean:
 	rm -f dist/$(UUID).zip
 	rm -f $(SCHEMA_DIR)/gschemas.compiled
 	rm -rf backend/__pycache__ extension/__pycache__ tests/__pycache__
+

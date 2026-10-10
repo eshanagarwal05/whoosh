@@ -5,6 +5,7 @@ import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import St from 'gi://St';
+import Mtk from 'gi://Mtk';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import WhooshCoreExtension from './extension-core.js';
@@ -117,6 +118,9 @@ export default class WhooshExtension extends WhooshCoreExtension {
     }
 
     disable() {
+        for (const id of this._cornerSettleSources?.values() ?? [])
+            GLib.source_remove(id);
+        this._cornerSettleSources?.clear();
         this._clearSwipePreview();
         this._windowResize?.disable();
         this._windowResize = null;
@@ -508,7 +512,17 @@ export default class WhooshExtension extends WhooshCoreExtension {
             if (pending && pending.window && !pending.window.is_hidden()) {
                 this._scrollTarget = pending.window;
                 this._lastHorizontal = null;
-                super._handleAction(pending.action);
+                if (pending.rect) {
+                    const {x, y, width, height} = pending.rect;
+                    if (pending.window.minimized)
+                        pending.window.unminimize();
+                    this._moveResizeAnimated(pending.window, x, y, width, height);
+                    this._activate(pending.window, global.display.get_current_time());
+                    if (this._scrollOverviewTarget === pending.window)
+                        Main.overview.hide();
+                } else {
+                    super._handleAction(pending.action);
+                }
                 this._lastHorizontal = null;
             }
             return;
@@ -601,27 +615,41 @@ export default class WhooshExtension extends WhooshCoreExtension {
         }
         const [, , modifiers] = global.get_pointer();
         const shift = (modifiers & Clutter.ModifierType.SHIFT_MASK) !== 0;
-        let action = side && vertical ? `corner_${side}_${vertical}` : side ?? vertical;
-        if (shift) action = `shift_${direction}`;
-        this._swipePreview = {window: win, side, vertical, action};
+        const horizontal = direction === 'left' || direction === 'right';
+        // Shift uses a spatial thirds grid, never a wrapping size cycle.
+        // Reverse through: left third, left two-thirds, center third,
+        // right two-thirds, right third. Motion beyond an edge stays there.
+        let column = previous?.shift ? previous.column : null;
+        if (shift && horizontal) {
+            const step = direction === 'left' ? -1 : 1;
+            column = column === null || column === undefined
+                ? step * 2 : Math.max(-2, Math.min(2, column + step));
+        }
+        const action = side && vertical
+            ? `corner_${side}_${vertical}` : side ?? vertical;
         const area = win.get_work_area_current_monitor();
         let {x, y, width, height} = area;
         if (side) {
-            const left = Math.floor(width / 2);
-            if (side === 'right') { x += left; width -= left; }
-            else width = left;
+            if (shift) {
+                column ??= side === 'left' ? -2 : 2;
+                const ranges = [[0, 1], [0, 2], [1, 2], [1, 3], [2, 3]];
+                const [start, end] = ranges[column + 2];
+                x = area.x + Math.round(area.width * start / 3);
+                width = Math.round(area.width * end / 3) - (x - area.x);
+            } else {
+                width = Math.round(area.width / 2);
+                x = side === 'right' ? area.x + area.width - width : area.x;
+            }
         }
-        if (side && vertical || shift && !side) {
-            const top = Math.floor(height / 2);
-            if (vertical === 'down') { y += top; height -= top; }
-            else height = top;
+        if ((side && vertical) || (shift && vertical)) {
+            height = Math.round(area.height / 2);
+            y = vertical === 'down' ? area.y + area.height - height : area.y;
         }
-        if (shift && side) {
-            width = Math.floor(area.width / 4);
-            x = side === 'right' ? area.x + area.width - width : area.x;
-            y = area.y;
-            height = area.height;
-        }
+        ({x, y, width, height} = this._constrainTileRect(win, {x, y, width, height}));
+        this._swipePreview = {
+            window: win, side, vertical, action, shift, column,
+            rect: shift || side ? {x, y, width, height} : null,
+        };
         if (!this._swipePreviewActor) {
             this._swipePreviewActor = new St.Widget({
                 reactive: false,
@@ -782,7 +810,89 @@ export default class WhooshExtension extends WhooshCoreExtension {
         return false;
     }
 
+    _moveResizeDirect(win, actor, x, y, width, height) {
+        super._moveResizeDirect(win, actor, x, y, width, height);
+        const area = win.get_work_area_current_monitor();
+        const right = Math.abs(x + width - area.x - area.width) <= 2;
+        const bottom = Math.abs(y + height - area.y - area.height) <= 2;
+        this._cornerSettleSources ??= new Map();
+        const old = this._cornerSettleSources.get(win);
+        if (old) GLib.source_remove(old);
+        let attempts = 0;
+        const id = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 50, () => {
+            try {
+                const actual = win.get_frame_rect();
+                const targetX = right
+                    ? Math.max(area.x, area.x + area.width - actual.width) : x;
+                const targetY = bottom
+                    ? Math.max(area.y, area.y + area.height - actual.height) : y;
+                if (Math.abs(actual.width - width) > 2 ||
+                    Math.abs(actual.height - height) > 2) {
+                    // The application accepted a different size. Stop asking
+                    // for an impossible rectangle and anchor the real frame.
+                    this._cancelResizeGuard(win);
+                    if (actual.x !== targetX || actual.y !== targetY)
+                        win.move_frame(true, targetX, targetY);
+                }
+            } catch (_) {
+                attempts = 4;
+            }
+            if (++attempts >= 4) {
+                this._cornerSettleSources.delete(win);
+                return GLib.SOURCE_REMOVE;
+            }
+            return GLib.SOURCE_CONTINUE;
+        });
+        this._cornerSettleSources.set(win, id);
+    }
+
+    _constrainTileRect(win, desired) {
+        const area = win.get_work_area_current_monitor();
+        const current = win.get_frame_rect?.() ?? desired;
+        let minWidth = 1, minHeight = 1;
+        let maxWidth = Infinity, maxHeight = Infinity;
+        for (const [method, minimum] of [['get_min_size', true], ['get_max_size', false]]) {
+            try {
+                const [known, w, h] = win[method]();
+                if (!known) continue;
+                const frame = win.client_rect_to_frame_rect
+                    ? win.client_rect_to_frame_rect(new Mtk.Rectangle({x: 0, y: 0, width: w, height: h}))
+                    : {width: w, height: h};
+                if (minimum) {
+                    if (w > 0) minWidth = frame.width;
+                    if (h > 0) minHeight = frame.height;
+                } else {
+                    if (w > 0) maxWidth = frame.width;
+                    if (h > 0) maxHeight = frame.height;
+                }
+            } catch (_) {
+            }
+        }
+        // Dialogs and other fixed-size windows can still be positioned.
+        if (win.allows_resize?.() === false) {
+            minWidth = maxWidth = current.width;
+            minHeight = maxHeight = current.height;
+        }
+        const width = Math.max(minWidth, Math.min(desired.width, maxWidth));
+        const height = Math.max(minHeight, Math.min(desired.height, maxHeight));
+        const anchor = (pos, size, start, span, nextSize) => {
+            let result = pos;
+            if (Math.abs(pos + size - start - span) <= 2)
+                result = start + span - nextSize;
+            else if (Math.abs(pos + size / 2 - start - span / 2) <= 2)
+                result = start + Math.round((span - nextSize) / 2);
+            // If the minimum exceeds the monitor, keep the title bar reachable.
+            return Math.max(start, Math.min(result, start + Math.max(0, span - nextSize)));
+        };
+        return {
+            x: anchor(desired.x, desired.width, area.x, area.width, width),
+            y: anchor(desired.y, desired.height, area.y, area.height, height),
+            width, height,
+        };
+    }
+
     _moveResizeAnimated(win, x, y, width, height) {
+        ({x, y, width, height} = this._constrainTileRect(win, {x, y, width, height}));
         const actor = win.get_compositor_private();
 
         if (!this._animationsEnabled()) {

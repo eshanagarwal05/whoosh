@@ -252,6 +252,8 @@ class TouchpadProxy:
         self.suppressed = False
         self.suppression_kind = None
         self.action_emitted = False
+        self.last_swipe_direction = None
+        self.last_swipe_motion = 0.0
         self.action_side = None
         self.action_time = 0.0
         self.action_y = 0.0
@@ -364,6 +366,8 @@ class TouchpadProxy:
         self.suppressed = False
         self.suppression_kind = None
         self.action_emitted = False
+        self.last_swipe_direction = None
+        self.last_swipe_motion = 0.0
         self.action_side = None
         self.action_time = 0.0
         self.action_y = 0.0
@@ -397,6 +401,10 @@ class TouchpadProxy:
         dy = centroid[1] - self.base_centroid[1]
         ax, ay = abs(dx), abs(dy)
         threshold = self.configuration.action_mm
+        now = time.monotonic()
+        paused = now - self.last_swipe_motion >= 0.18
+        if ax > 0.1 or ay > 0.1:
+            self.last_swipe_motion = now
         if ax >= threshold and ax >= ay * DOMINANCE:
             action = "left" if dx < 0 else "right"
         elif ay >= threshold and ay >= ax * DOMINANCE:
@@ -406,8 +414,13 @@ class TouchpadProxy:
 
         if not self.action_emitted:
             self.send_action("scroll_begin")
-        self.action_emitted = True
         self.base_centroid = centroid
+        # A stroke produces one step. Rearm after a pause or a deliberate
+        # direction change, not every threshold crossed by the same stroke.
+        if self.action_emitted and action == self.last_swipe_direction and not paused:
+            return
+        self.action_emitted = True
+        self.last_swipe_direction = action
         self.send_action(action)
 
     def _start_candidate(self):
