@@ -117,6 +117,7 @@ export default class WhooshExtension extends WhooshCoreExtension {
     }
 
     disable() {
+        this._clearSwipePreview();
         this._windowResize?.disable();
         this._windowResize = null;
         this._sendMouseSuppressionState(false);
@@ -276,6 +277,7 @@ export default class WhooshExtension extends WhooshCoreExtension {
     }
 
     _resetTouchpadTargets() {
+        this._clearSwipePreview();
         this._cancelTabTargets();
         this._lastHorizontal = null;
         this._scrollTarget = null;
@@ -496,6 +498,28 @@ export default class WhooshExtension extends WhooshCoreExtension {
         if (!this._touchpadEnabled())
             return;
 
+        if (action === 'gesture_claim_begin')
+            this._clearSwipePreview();
+
+        if (action === 'gesture_claim_end') {
+            const pending = this._swipePreview;
+            this._clearSwipePreview();
+            super._handleAction(action);
+            if (pending && pending.window && !pending.window.is_hidden()) {
+                this._scrollTarget = pending.window;
+                this._lastHorizontal = null;
+                super._handleAction(pending.action);
+                this._lastHorizontal = null;
+            }
+            return;
+        }
+
+        if (this._gestureClaimActive && this._scrollTarget &&
+            /^(left|right|up|down)$/.test(action)) {
+            this._updateSwipePreview(action);
+            return;
+        }
+
         if (/^(left|right|up|down)$/.test(action)) {
             const [, , modifiers] = global.get_pointer();
             if ((modifiers & Clutter.ModifierType.SHIFT_MASK) !== 0)
@@ -550,6 +574,63 @@ export default class WhooshExtension extends WhooshCoreExtension {
             (action === 'left' || action === 'right')) {
             this._lastHorizontal = null;
         }
+    }
+
+    _clearSwipePreview() {
+        this._swipePreviewActor?.destroy();
+        this._swipePreviewActor = null;
+        this._swipePreview = null;
+    }
+
+    _updateSwipePreview(direction) {
+        const win = this._scrollTarget;
+        if (!win || win.is_hidden()) {
+            this._clearSwipePreview();
+            return;
+        }
+        const previous = this._swipePreview;
+        let side = previous?.side ?? null;
+        let vertical = previous?.vertical ?? null;
+        if (direction === 'left' || direction === 'right')
+            side = direction;
+        else
+            vertical = direction;
+        if (!this._cornerTilingEnabled()) {
+            if (direction === 'left' || direction === 'right') vertical = null;
+            else side = null;
+        }
+        const [, , modifiers] = global.get_pointer();
+        const shift = (modifiers & Clutter.ModifierType.SHIFT_MASK) !== 0;
+        let action = side && vertical ? `corner_${side}_${vertical}` : side ?? vertical;
+        if (shift) action = `shift_${direction}`;
+        this._swipePreview = {window: win, side, vertical, action};
+        const area = win.get_work_area_current_monitor();
+        let {x, y, width, height} = area;
+        if (side) {
+            const left = Math.floor(width / 2);
+            if (side === 'right') { x += left; width -= left; }
+            else width = left;
+        }
+        if (side && vertical || shift && !side) {
+            const top = Math.floor(height / 2);
+            if (vertical === 'down') { y += top; height -= top; }
+            else height = top;
+        }
+        if (shift && side) {
+            width = Math.floor(area.width / 4);
+            x = side === 'right' ? area.x + area.width - width : area.x;
+            y = area.y;
+            height = area.height;
+        }
+        if (!this._swipePreviewActor) {
+            this._swipePreviewActor = new St.Widget({
+                reactive: false,
+                style: 'background-color: rgba(80, 150, 255, 0.25); border: 2px solid rgba(100, 170, 255, 0.9); border-radius: 12px;',
+            });
+            Main.layoutManager.addChrome(this._swipePreviewActor);
+        }
+        this._swipePreviewActor.set_position(x, y);
+        this._swipePreviewActor.set_size(width, height);
     }
 
     _getOverviewWindowUnderPointer(px, py) {
