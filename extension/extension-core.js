@@ -1055,7 +1055,7 @@ export default class WhooshExtension extends Extension {
         if (maximizeFlags) {
             if (actor)
                 Main.wm.skipNextEffect(actor);
-            win.unmaximize(maximizeFlags);
+            win.unmaximize();
         }
     }
 
@@ -1232,7 +1232,7 @@ export default class WhooshExtension extends Extension {
                         if (actor)
                             Main.wm.skipNextEffect(actor);
 
-                        win.unmaximize(maximizeFlags);
+                        win.unmaximize();
                     }
 
                     const rect = win.get_frame_rect();
