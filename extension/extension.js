@@ -821,6 +821,17 @@ export default class WhooshExtension extends WhooshCoreExtension {
         let attempts = 0;
         const id = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 50, () => {
             try {
+                // Restoring a maximized/fullscreen window is asynchronous.
+                // Let the core guard finish applying the requested tile before
+                // interpreting a larger frame as an application size limit.
+                const restoring = this._resizeGuards?.has(win) ||
+                    win.is_fullscreen?.() || win.get_maximize_flags?.();
+                if (restoring) {
+                    if (++attempts < 16)
+                        return GLib.SOURCE_CONTINUE;
+                    this._cornerSettleSources.delete(win);
+                    return GLib.SOURCE_REMOVE;
+                }
                 const actual = win.get_frame_rect();
                 const targetX = right
                     ? Math.max(area.x, area.x + area.width - actual.width) : x;
@@ -869,7 +880,9 @@ export default class WhooshExtension extends WhooshCoreExtension {
             }
         }
         // Dialogs and other fixed-size windows can still be positioned.
-        if (win.allows_resize?.() === false) {
+        const restoring = win.is_maximized?.() ||
+            win.get_maximize_flags?.() || win.is_fullscreen?.();
+        if (!restoring && win.allows_resize?.() === false) {
             minWidth = maxWidth = current.width;
             minHeight = maxHeight = current.height;
         }
