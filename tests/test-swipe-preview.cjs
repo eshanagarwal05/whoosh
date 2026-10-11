@@ -58,3 +58,18 @@ const refuses={get_work_area_current_monitor:()=>({x:0,y:0,width:1000,height:800
 e._moveResizeDirect(refuses,null,500,400,500,400);settle();assert.deepEqual(position,{x:350,y:250});assert.equal(guardCancelled,1);
 for(let i=0;i<3;i++)settle();assert.equal(e._cornerSettleSources.size,0);
 console.log('Actual application resize refusal reanchors the real window and stops impossible resize retries');
+
+// A maximized frame during asynchronous restore is not a resize refusal.
+position=null;guardCancelled=0;e._resizeGuards=new Map([[refuses,{}]]);
+e._moveResizeDirect(refuses,null,500,400,500,400);
+for(let i=0;i<10;i++)assert.equal(settle(),true);
+assert.equal(guardCancelled,0);assert.equal(position,null);
+e._resizeGuards.delete(refuses);
+settle();assert.deepEqual(position,{x:350,y:250});
+console.log('First tile after maximize preserves restore retries until the guard finishes');
+
+// Maximized windows can temporarily disallow resize; that is not a fixed-size app.
+const maximized={get_work_area_current_monitor:()=>({x:0,y:0,width:1000,height:800}),get_frame_rect:()=>({x:0,y:0,width:1000,height:800}),allows_resize:()=>false,is_maximized:()=>true,get_maximize_flags:()=>3};
+const firstHalf=e._constrainTileRect(maximized,{x:500,y:0,width:500,height:800});
+assert.deepEqual(JSON.parse(JSON.stringify(firstHalf)),{x:500,y:0,width:500,height:800});
+console.log('Maximized windows keep the first requested half tile even when resize is temporarily disallowed');
