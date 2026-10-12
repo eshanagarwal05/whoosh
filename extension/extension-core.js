@@ -1592,8 +1592,13 @@ export default class WhooshExtension extends Extension {
     _close(win, time) {
         this._cancelResizeGuard(win);
 
-        if (win.can_close())
-            win.delete(time);
+        if (win.can_close()) {
+            // Proxy gestures and async tab callbacks have no Clutter event;
+            // get_current_time() can be zero outside event dispatch. Native
+            // clients require a valid timestamp for the close/ping request.
+            const timestamp = time || global.display.get_current_time_roundtrip();
+            win.delete(timestamp);
+        }
     }
 }
 
