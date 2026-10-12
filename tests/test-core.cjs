@@ -56,3 +56,12 @@ for(const [y,scale,expected] of [[120,0.6,'close'],[300,0.6,null],[156,0.6,null]
  if(expected)assert.equal(touchActions.at(-1),expected);
 }
 console.log('Touchscreen close is title-bar only; content fullscreen still works');
+
+let closeTimestamp=null,roundtrips=0;
+context.global.display.get_current_time_roundtrip=()=>{roundtrips++;return 12345};
+const closeCore=new context.Core();closeCore._cancelResizeGuard=()=>{};
+const nativeWindow={can_close:()=>true,delete:t=>closeTimestamp=t};
+closeCore._close(nativeWindow,0);assert.equal(closeTimestamp,12345);assert.equal(roundtrips,1);
+closeCore._close(nativeWindow,678);assert.equal(closeTimestamp,678);assert.equal(roundtrips,1);
+closeCore._close({can_close:()=>false},0);assert.equal(roundtrips,1);
+console.log('Native close replaces zero proxy timestamps and preserves valid event timestamps');
