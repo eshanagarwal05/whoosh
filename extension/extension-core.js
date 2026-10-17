@@ -3,7 +3,7 @@
 //
 
 import Clutter from 'gi://Clutter';
-import {TabTarget, startTabHelper, stopTabHelper} from './tab-target.js';
+import {stopTabHelper} from './tab-target.js';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Shell from 'gi://Shell';
@@ -29,7 +29,6 @@ const INTERFACE_NAME = 'io.github.eshanagarwal05.Whoosh';
 
 export default class WhooshExtension extends Extension {
     enable() {
-        startTabHelper(this.path);
         this._tabTargets = new Set();
         this._tabFocusTimers = new Set();
         this._tabKeyboard = null;
@@ -226,14 +225,6 @@ export default class WhooshExtension extends Extension {
             // Capture scope at gesture start; moving into the title bar later
             // must not turn an ordinary content pinch into a close request.
             this._pinchTarget = this._pinchFullscreenAllowed ? win : null;
-            if (this._pinchTarget) {
-                try {
-                    this._pinchTabTarget = new TabTarget(this.path, win, px, py, this._pinchFullscreenAllowed);
-                    this._tabTargets.add(this._pinchTabTarget);
-                } catch (error) {
-                    console.error(`Whoosh tab detection unavailable: ${error}`);
-                }
-            }
             return;
         }
 
@@ -274,7 +265,6 @@ export default class WhooshExtension extends Extension {
             }
 
             const win = this._pinchTarget;
-            const tab = this._pinchTabTarget;
             this._pinchTarget = null;
             this._pinchTabTarget = null;
             if (action === 'pinch_out')
@@ -284,10 +274,9 @@ export default class WhooshExtension extends Extension {
                 return;
 
             if (action === 'pinch_in') {
-                if (this._gestureClaimActive)
-                    this._queueClose(win, tab);
-                else
-                    this._performPinchClose(win, tab, time);
+                // Title-bar pinches close the captured window immediately.
+                // Do not wait for accessibility, focus, or finger release.
+                this._close(win, time);
             } else if (this._pinchFullscreenAllowed) {
                 this._fullscreen(win);
                 this._activate(win, time);

@@ -37,13 +37,29 @@ const scopeWin={...win,get_frame_rect:()=>({x:100,y:100,width:600,height:400})};
 let pointer=[300,300,0],pinchCloses=0,lookups=0;
 context.global.get_pointer=()=>pointer;
 context.TabTarget=class {constructor(){lookups++} cancel(){}};
-c._performPinchClose=()=>pinchCloses++;
+c._close=()=>pinchCloses++;
 for(const [x,y,allowed] of [[300,120,true],[300,155,true],[300,156,false],[300,300,false],[95,120,false],[300,500,false]]){
  pointer=[x,y,0];const previous=pinchCloses,previousLookups=lookups;
  c._handleAction('pinch_begin');pointer=[300,120,0];c._handleAction('pinch_in');
- assert.equal(pinchCloses,previous+Number(allowed));assert.equal(lookups,previousLookups+Number(allowed));
+ assert.equal(pinchCloses,previous+Number(allowed));assert.equal(lookups,previousLookups);
 }
 console.log('Touchpad content pinches cannot close, even after moving into title bar');
+
+// A recognized title-bar pinch closes synchronously while the claim is active,
+// including an unfocused window, and does not schedule a helper or timer.
+pointer=[300,120,0];c._gestureClaimActive=true;
+const beforeImmediate=pinchCloses;
+c._handleAction('pinch_begin');c._handleAction('pinch_in');
+assert.equal(pinchCloses,beforeImmediate+1);
+c._handleAction('gesture_claim_end');
+assert.equal(pinchCloses,beforeImmediate+1);
+c._handleAction('pinch_in');assert.equal(pinchCloses,beforeImmediate+1);
+c._getWindowUnderPointer=()=>({...scopeWin,is_hidden:()=>true});
+c._handleAction('pinch_begin');c._handleAction('pinch_in');
+assert.equal(pinchCloses,beforeImmediate+1);
+assert(!src.includes('startTabHelper(this.path)'));
+console.log('Title-bar close is immediate during a claim, runs once, skips hidden windows, and starts no accessibility helper');
+
 
 const fourSource=fs.readFileSync(require('path').join(__dirname,'../extension/fourfinger.js'),'utf8').replace(/^import .*;\n/gm,'').replace('export class FourFingerTouchController','class FourFingerTouchController');
 vm.runInContext(fourSource+'\nthis.Four=FourFingerTouchController;',context);
