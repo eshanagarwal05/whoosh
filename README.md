@@ -10,57 +10,21 @@ Whoosh brings touchpad, mouse, and touchscreen window gestures to GNOME Shell 50
 | Two-finger swipe right | Tile right half |
 | Two-finger swipe up | Maximize |
 | Two-finger swipe down | Minimize |
-| Pinch in | Close the hovered tab when possible, otherwise close the window |
+| Pinch in | Close the window |
 | Pinch out | Fullscreen |
 | Left → Up | Top-left quarter |
 | Left → Down | Bottom-left quarter |
 | Right → Up | Top-right quarter |
 | Right → Down | Bottom-right quarter |
 
-### Pinch to close tabs
+### Pinch to close windows
 
-Pinch inward over the title bar to close the hovered tab when possible,
-otherwise close the window. Pinches that start over ordinary window content,
-including tab rows outside the title bar, do not close tabs or windows.
-Moving into the title bar after starting a pinch does not enable closing.
-Pinch-out keeps its existing title-bar scope.
-
-Whoosh uses AT-SPI accessibility information to identify the target window and
-tab. It focuses the target window when needed to distinguish windows with the
-same title, including Chrome profile windows. It prefers the tab's close
-control; when necessary it selects and verifies the tab before sending the
-close-tab shortcut. This is Ctrl+W for most apps and Ctrl+Shift+W for supported
-terminal apps. Standard accessible tabs are supported generically, and
-Obsidian's custom note tabs have a dedicated adapter. Apps with inaccessible
-widgets or different shortcuts fall back to closing the target window. The
-window manager may still ask you to save unsaved work before closing.
-
-The helper requires Python 3, PyGObject, and the AT-SPI 2 introspection library
-(`gi.repository.Atspi`). Whoosh enables GNOME toolkit accessibility when it
-starts, without starting screen-reader speech. It leaves accessibility enabled
-when disabled so other accessibility clients continue working. Apps that were
-already running may need to be restarted. You can also enable it manually:
-
-```sh
-gsettings set org.gnome.desktop.interface toolkit-accessibility true
-```
-
-Fully restart the affected apps afterward. If the log says `Application
-accessibility is unavailable`, the app may not be registered on the accessibility
-bus. Whoosh also supports a different accessibility process ID when exactly one
-active window matches the captured title and geometry.
-
-Chrome and Obsidian must be launched with
-`--force-renderer-accessibility=complete`, including any profile/app shortcuts
-that start a separate browser process. Fully restart those apps after changing
-their launch flags. On installations whose launchers support per-user flags,
-add this flag to `~/.config/chrome-flags.conf` and
-`~/.config/obsidian/user-flags.conf`, respectively.
-
-Whoosh keeps one idle helper ready to avoid starting Python on each pinch.
-Each gesture still gets a separate cancellable process. Close actions begin
-when the pinch is recognized; focused windows do not wait for an activation
-timer.
+Pinch inward over the title bar to close that window as soon as the gesture is
+recognized, without waiting for finger release, focus, or accessibility lookup.
+Pinches that start over ordinary window content do not close windows. Moving
+into the title bar after starting a pinch does not enable closing. Pinch-out
+keeps its existing title-bar scope. Whoosh no longer enables toolkit accessibility
+or closes individual tabs. The window manager may still ask you to save unsaved work.
 
 ### Mouse controls
 
