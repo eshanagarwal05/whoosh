@@ -238,13 +238,9 @@ export default class WhooshExtension extends Extension {
 
             if (overviewWin) {
                 if (action === 'pinch_in') {
-                    const overviewApp =
-                        this._windowTracker?.get_window_app(overviewWin);
-
-                    if (overviewApp)
-                        this._quitDashApp(overviewApp);
-                    else
-                        this._close(overviewWin, time);
+                    // A preview represents one window, even when its app has
+                    // other windows. App-wide quit belongs to dash icons only.
+                    this._close(overviewWin, time);
                 } else {
                     this._moveOverviewWindowToNewWorkspace(
                         overviewWin,
