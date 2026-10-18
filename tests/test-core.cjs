@@ -81,3 +81,29 @@ closeCore._close(nativeWindow,0);assert.equal(closeTimestamp,12345);assert.equal
 closeCore._close(nativeWindow,678);assert.equal(closeTimestamp,678);assert.equal(roundtrips,1);
 closeCore._close({can_close:()=>false},0);assert.equal(roundtrips,1);
 console.log('Native close replaces zero proxy timestamps and preserves valid event timestamps');
+
+// Overview previews close the captured window, never its sibling or app.
+const overviewCore=new context.Core();
+overviewCore._cancelTabTargets=()=>{};
+const sibling={name:'sibling'},preview={name:'preview'};
+const overviewApp={get_windows:()=>[preview,sibling]};
+let hovered=preview,closedPreviews=[],quitApps=[],movedPreviews=[];
+overviewCore._getOverviewWindowUnderPointer=()=>hovered;
+overviewCore._getDashAppUnderPointer=()=>overviewApp;
+overviewCore._windowTracker={get_window_app:()=>overviewApp};
+overviewCore._close=(w,t)=>closedPreviews.push([w,t]);
+overviewCore._quitDashApp=a=>quitApps.push(a);
+overviewCore._moveOverviewWindowToNewWorkspace=(w,t)=>movedPreviews.push([w,t]);
+overviewCore._handleAction('pinch_begin');hovered=sibling;
+overviewCore._handleAction('pinch_in');
+assert.deepEqual(closedPreviews,[[preview,1]]);
+assert.deepEqual(quitApps,[]);
+assert.equal(overviewCore._pinchOverviewTarget,null);
+overviewCore._handleAction('pinch_begin');overviewCore._handleAction('pinch_out');
+assert.deepEqual(movedPreviews,[[sibling,1]]);
+assert.equal(closedPreviews.length,1);
+hovered=null;
+overviewCore._handleAction('pinch_begin');overviewCore._handleAction('pinch_in');
+assert.deepEqual(quitApps,[overviewApp]);
+assert.equal(closedPreviews.length,1);
+console.log('Overview closes only the captured preview; sibling windows, pinch-out, and dash quit are preserved');

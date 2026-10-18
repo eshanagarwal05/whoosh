@@ -63,6 +63,13 @@ Four-finger touchscreen pinch-to-close must start with the center of the four co
 
 When a multi-touch touchscreen sequence begins, Whoosh temporarily pauses its one-finger title-bar drag controller. It restores that controller after the fingers are released, preventing the title-bar drag recognizer from competing with a four-finger gesture.
 
+### GNOME Overview
+
+Pinch inward over a window preview to close only that window. Other windows
+from the same application stay open. The target is captured when the pinch
+begins, so moving the pointer during the gesture does not change it.
+Pinch outward to move that window to a new workspace.
+
 ### GNOME dash and Dash to Dock
 
 | Gesture over a dash app | Action |
